@@ -1,21 +1,25 @@
 // Конфигурация Prisma CLI (Prisma 7).
 //
 // URL подключения берётся ТОЛЬКО из переменной окружения DATABASE_URL
-// (production — строка Neon PostgreSQL, локально — свой Postgres).
-// .env не подхватывается автоматически, поэтому подключаем dotenv.
+// (production/Vercel — строка Neon PostgreSQL, локально — свой Postgres).
+// Никаких фолбэков и захардкоженных строк: если DATABASE_URL не задан,
+// env() из prisma/config падает с понятной ошибкой, называя переменную.
+//
+// .env не подхватывается Prisma автоматически (в отличие от Next.js),
+// поэтому подключаем dotenv — локально он читает .env, на Vercel просто no-op.
 import "dotenv/config";
-import { defineConfig } from "prisma/config";
-
-const databaseUrl = process.env["DATABASE_URL"]?.trim();
+import { defineConfig, env } from "prisma/config";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
-  // datasource нужен командам migrate/seed/studio.
-  // `prisma generate` работает и без него, поэтому URL добавляем только когда он задан.
-  ...(databaseUrl ? { datasource: { url: databaseUrl } } : {}),
   migrations: {
     path: "prisma/migrations",
     seed: "tsx prisma/seed.ts",
   },
+  // datasource.url обязателен для migrate deploy / migrate dev / seed / studio.
+  datasource: {
+    url: env("DATABASE_URL"),
+  },
 });
+
 
