@@ -1,26 +1,356 @@
 @import "tailwindcss";
 
+/* Dark mode управляется классом .dark на <html> (Telegram theme / системная тема). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
+  /* Бренд (primary одинаков в обеих темах) */
+  --primary: #6c5ce7;
+  --primary-press: #5a49d6;
+  --primary-soft: #f0edff;
+  --primary-soft-strong: #e6e1ff;
+  --primary-gradient: linear-gradient(135deg, #6c5ce7 0%, #8a7bff 100%);
+
+  /* Поверхности */
+  --page-background: #ffffff;
   --background: #ffffff;
-  --foreground: #171717;
+  --card: #ffffff;
+  --card-secondary: #f7f7f9;
+  --surface: var(--card-secondary);
+  --nav-background: #ffffff;
+
+  /* Текст и границы */
+  --foreground: #202124;
+  --muted: #8b8e95;
+  --border: #e8e8ec;
+  --star-inactive: #d5d7dc;
+
+  /* Статусы */
+  --success: #20b26b;
+  --success-soft: #e7f8ef;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --error-soft: #fdecec;
+
+  /* Рейтинг */
+  --gold: linear-gradient(135deg, #f7b733 0%, #fcd34d 100%);
+  --silver: linear-gradient(135deg, #b9bec7 0%, #e2e6ea 100%);
+  --bronze: linear-gradient(135deg, #cd7f32 0%, #e6a76a 100%);
+
+  /* Декор */
+  --grid-line: rgba(32, 33, 36, 0.045);
+  --skeleton-from: #f1f1f4;
+  --skeleton-to: #e6e6ea;
+
+  --app-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.03), 0 12px 32px -24px rgba(16, 24, 40, 0.35);
+  --app-shadow-nav: 0 -10px 34px -26px rgba(16, 24, 40, 0.45);
+  --app-shadow-float: 0 18px 40px -24px rgba(108, 92, 231, 0.55);
+
+  /* Поверхность кнопки на primary-градиенте (карточка баланса) */
+  --accent-surface: #ffffff;
+  --accent-surface-text: #4b3fd0;
+}
+
+.dark {
+  /* Primary не меняется между темами */
+  --primary: #6c5ce7;
+  --primary-press: #7d6ff0;
+  --primary-soft: #282340;
+  --primary-soft-strong: #342c52;
+  --primary-gradient: linear-gradient(135deg, #4b3fc4 0%, #6c5ce7 100%);
+
+  /* Поверхности: не инверсия, а сохранение иерархии */
+  --page-background: #111111;
+  --background: #111111;
+  --card: #1c1c1e;
+  --card-secondary: #242428;
+  --nav-background: #1c1c1e;
+
+  /* Текст и границы */
+  --foreground: #ffffff;
+  --muted: #a1a1aa;
+  --border: #343438;
+  --star-inactive: #4a4a50;
+
+  /* Статусы (мягче для тёмного фона) */
+  --success: #34c77b;
+  --success-soft: rgba(32, 178, 107, 0.16);
+  --warning: #f5a524;
+  --error: #f87171;
+  --error-soft: rgba(239, 68, 68, 0.16);
+
+  /* Декор */
+  --grid-line: rgba(161, 161, 170, 0.06);
+  --skeleton-from: #242428;
+  --skeleton-to: #2f2f34;
+
+  --app-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 36px -26px rgba(0, 0, 0, 0.9);
+  --app-shadow-nav: 0 -10px 34px -26px rgba(0, 0, 0, 0.9);
+  --app-shadow-float: 0 18px 40px -24px rgba(0, 0, 0, 0.8);
+
+  --accent-surface: #ffffff;
+  --accent-surface-text: #3c30b8;
 }
 
 @theme inline {
+  --color-primary: var(--primary);
+  --color-primary-press: var(--primary-press);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-soft-strong: var(--primary-soft-strong);
   --color-background: var(--background);
+  --color-page: var(--page-background);
+  --color-card: var(--card);
+  --color-card-secondary: var(--card-secondary);
+  --color-surface: var(--card-secondary);
+  --color-nav: var(--nav-background);
+  --color-accent-surface: var(--accent-surface);
+  --color-accent-surface-text: var(--accent-surface-text);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-star: var(--star-inactive);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --color-error-soft: var(--error-soft);
+
+  --shadow-card: var(--app-shadow-card);
+  --shadow-nav: var(--app-shadow-nav);
+  --shadow-float: var(--app-shadow-float);
+
+  --radius-card: 24px;
+  --radius-sheet: 28px;
+  --radius-field: 18px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, "Segoe UI", Roboto,
+    sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  /*
+   * ВАЖНО: overflow-x: clip (а не hidden) — не создаёт scroll-контейнер
+   * на html/body, поэтому вертикальная прокрутка документа работает свободно.
+   * overflow-x: hidden на html/body превращал body во вложенный скроллер
+   * и полностью блокировал прокрутку (проверено: scrollY не менялся).
+   */
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: clip;
+    overflow-y: visible;
+  }
+
+  html {
+    height: auto;
+    min-height: 100%;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    /* Контент может быть выше viewport — страница свободно прокручивается */
+    min-height: 100dvh;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.45;
+    text-rendering: optimizeLegibility;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Блокировка прокрутки на время открытого bottom sheet (класс ставится на html) */
+  html.scroll-locked,
+  html.scroll-locked body {
+    overflow: hidden;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  input,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  textarea {
+    resize: none;
+  }
+
+  ::selection {
+    background: var(--primary);
+    color: #ffffff;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* --- Компонентный слой --- */
+@layer components {
+  /* Каркас приложения: mobile-first, на desktop не растягивается шире 900px */
+  .app-frame {
+    width: 100%;
+    max-width: 900px;
+    margin-inline: auto;
+    min-height: 100dvh;
+    background: var(--background);
+    position: relative;
+  }
+
+  @media (min-width: 768px) {
+    .app-frame {
+      box-shadow: 0 0 0 1px var(--border);
+    }
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .card-surface {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--app-shadow-card);
+  }
+
+  /* Едва заметная сетка на экранах «Задания» и «Задание» (адаптируется к теме) */
+  .grid-background {
+    background-color: var(--background);
+    background-image:
+      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+    background-size: 36px 36px;
+    background-position: -1px -1px;
+    background-repeat: repeat;
+  }
+
+  .pressable {
+    transition:
+      transform 150ms ease,
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease,
+      opacity 150ms ease;
+  }
+
+  .pressable:active {
+    transform: scale(0.98);
+  }
+
+  .skeleton {
+    background: linear-gradient(90deg, var(--skeleton-from) 25%, var(--skeleton-to) 37%, var(--skeleton-from) 63%);
+    background-size: 400% 100%;
+    animation: skeleton-loading 1.4s ease infinite;
+    border-radius: 14px;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .animate-sheet-in {
+    animation: sheet-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .animate-fade-in {
+    animation: fade-in 180ms ease-out;
+  }
+
+  .animate-toast-in {
+    animation: toast-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /*
+   * Короткий переход цветов ТОЛЬКО в момент смены темы.
+   * Класс theme-transition ставится на html на ~200мс, поэтому обычные
+   * тапы/ховеры остаются мгновенными.
+   */
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease,
+      fill 150ms ease,
+      stroke 150ms ease !important;
+  }
+
+  /* Семантические хелперы (всё через переменные темы) */
+  .bg-app {
+    background: var(--background);
+  }
+
+  .text-main {
+    color: var(--foreground);
+  }
+
+  .surface-secondary {
+    background: var(--card-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+  }
 }
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(12px) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+

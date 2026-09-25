@@ -1,0 +1,167 @@
+// VOXY — виртуальная (тренировочная) платформа заданий.
+// Все суммы в БД — виртуальные игровые рубли, а не реальные деньги.
+//
+// SQLite выбран для локальной разработки. Для перехода на PostgreSQL/Supabase
+// достаточно поменять provider + DATABASE_URL: структура моделей совместима.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum TaskType {
+  REVIEW_SIMULATION
+  SURVEY
+  PRODUCT_FEEDBACK
+  SERVICE_FEEDBACK
+  USER_RESEARCH
+  PHOTO_SIMULATION
+  TEXT_TASK
+  TELEGRAM_SUBSCRIPTION
+  OTHER
+}
+
+enum TaskStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  EXPIRED
+}
+
+enum SubmissionStatus {
+  APPROVED
+  REJECTED
+}
+
+enum TransactionType {
+  EARN
+  SPEND
+}
+
+model User {
+  id             String   @id @default(cuid())
+  telegramId     String   @unique
+  username       String?
+  firstName      String
+  lastName       String?
+  photoUrl       String?
+  balance        Int      @default(0)
+  totalEarned    Int      @default(0)
+  completedTasks Int      @default(0)
+  isDemo         Boolean  @default(false)
+  /// true — сгенерированный demo-участник рейтинга (бот). Реальные пользователи и
+  /// локальный демо-пользователь — false. Ежедневные прибавки начисляются только ботам.
+  isMock         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  submissions  TaskSubmission[]
+  transactions VirtualTransaction[]
+
+  @@index([totalEarned])
+}
+
+model Task {
+  id                 String     @id @default(cuid())
+  title              String
+  description        String
+  conditions         String
+  virtualTarget      String
+  type               TaskType   @default(REVIEW_SIMULATION)
+  icon               String
+  reward             Int
+  minLength          Int        @default(20)
+  deadline           DateTime
+  status             TaskStatus @default(ACTIVE)
+  requiresModeration Boolean    @default(false)
+  requiresRating     Boolean    @default(true)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  options     TaskOption[]
+  submissions TaskSubmission[]
+
+  @@index([status, deadline])
+}
+
+model TaskOption {
+  id     String @id @default(cuid())
+  taskId String
+  text   String
+  order  Int    @default(0)
+
+  task        Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  submissions TaskSubmission[]
+
+  @@index([taskId])
+}
+
+model TaskSubmission {
+  id               String           @id @default(cuid())
+  userId           String
+  taskId           String
+  answer           String
+  rating           Int?
+  selectedOptionId String?
+  reward           Int
+  status           SubmissionStatus @default(APPROVED)
+  createdAt        DateTime         @default(now())
+
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task           Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  selectedOption TaskOption? @relation(fields: [selectedOptionId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, taskId])
+  @@index([taskId])
+  @@index([createdAt])
+}
+
+model VirtualTransaction {
+  id          String          @id @default(cuid())
+  userId      String
+  amount      Int
+  type        TransactionType
+  description String
+  createdAt   DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+/// Ежедневная агрегированная статистика приложения: одна запись на календарный день.
+/// Значения увеличиваются один раз в сутки на backend и хранятся в БД,
+/// поэтому все пользователи видят одинаковые числа.
+model AppStats {
+  id                String   @id @default(cuid())
+  /// Дата дня (локальная полночь) — уникальна, одна запись на день.
+  date              DateTime @unique
+  participantsCount Int
+  totalBonuses      Int
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([date])
+}
+
+/// Отметка о выполненном ежедневном обновлении рейтинга.
+/// Уникальная дата гарантирует, что обновление выполняется ровно один раз в сутки,
+/// даже если /api/leaderboard вызовут параллельно сотни клиентов.
+model LeaderboardDailyUpdate {
+  id           String   @id @default(cuid())
+  /// Дата дня (локальная полночь), уникальна.
+  date         DateTime @unique
+  /// Сколько участников получили ежедневную прибавку.
+  updatedUsers Int      @default(0)
+  /// Сколько новых участников добавилось.
+  createdUsers Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([date])
+}
+
