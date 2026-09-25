@@ -53,7 +53,8 @@ npm run dev        # http://localhost:3000
 
 | Переменная | Обязательна | Назначение |
 | --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | в production — да | токен бота из @BotFather: проверка `initData` и проверка подписок на каналы. **Только сервер** |
+| `TELEGRAM_BOT_TOKEN` | в production — да | токен бота из @BotFather: проверка `initData`, проверка подписок и ответ на `/start`. **Только сервер** |
+| `NEXT_PUBLIC_APP_URL` | в production — да | публичный HTTPS-адрес Mini App (тот же, что в BotFather) — URL кнопки «Открыть» в боте |
 | `AUTH_SECRET` | в production — да | подпись httpOnly-cookie с состоянием пользователя (`openssl rand -hex 32`) |
 
 `DATABASE_URL` проекту **не нужен**: он нигде не читается (проверяется grep-ом по
@@ -119,6 +120,75 @@ npm run typecheck && npm run lint
 **Игорь Рябов, @demo_user, 360 ₽** виртуального баланса. В `production` демо-режим
 полностью отключён — запросы без валидного `initData` получают `401`.
 
+## Telegram-бот: `/start` и кнопка «Открыть»
+
+Минимальная логика бота без polling, без SDK (никаких Telegraf/grammY) и без БД:
+Telegram вызывает наш webhook на Vercel, роут отвечает одним `sendMessage` через
+обычный server-side `fetch`.
+
+```
+Telegram → POST /api/telegram/webhook → sendMessage → кнопка «Открыть» → Mini App
+```
+
+| Файл | Роль |
+| --- | --- |
+| `app/api/telegram/webhook/route.ts` | принимает Telegram Update, распознаёт `/start`, отвечает приветствием |
+| `lib/telegram-bot.ts` | server-only обёртка над Bot API: `sendTelegramMessage()`, текст приветствия, клавиатура |
+
+Поведение:
+
+- `/start`, `/start <payload>`, `/start@botname`, `/start@botname <payload>` — во всех
+  случаях бот отправляет одно и то же приветствие с одной inline-кнопкой «Открыть»;
+- ответ уходит ровно в `message.chat.id` (telegram user id для этого не используется);
+- любые другие сообщения/update игнорируются с ответом `200 { "ok": true, "ignored": true }` —
+  endpoint не падает на незнакомых типах update и на битом JSON;
+- `GET /api/telegram/webhook` → `405` (`Allow: POST`);
+- повторный `/start` всегда отправляет то же сообщение (никаких состояний и записей в БД);
+- полный Telegram Update в production не логируется, токен не логируется никогда
+  (даже текст ошибки от Telegram очищается от токена);
+- если `TELEGRAM_BOT_TOKEN` не задан — `503 BOT_NOT_CONFIGURED`, если не задан
+  `NEXT_PUBLIC_APP_URL` — `503 APP_URL_NOT_CONFIGURED` (никаких localhost/fake-фолбэков
+  в коде нет);
+- если Telegram API вернул ошибку, роут логирует безопасную информацию
+  (`chat_id`, код, текст ошибки) и отвечает `200 { "ok": true, "delivered": false }`,
+  чтобы Telegram не повторял один и тот же update бесконечно.
+
+### Установка webhook
+
+Webhook нужно поставить один раз после деплоя. Вместо `<TOKEN>` подставьте токен своего
+бота, вместо `YOUR_VERCEL_DOMAIN` — домен проекта (без `localhost`):
+
+```bash
+# 1. Установить webhook: Telegram будет стучаться в наш роут на Vercel
+curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://YOUR_VERCEL_DOMAIN/api/telegram/webhook"
+
+# 2. Проверить, что webhook установлен и ошибок нет
+curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"
+```
+
+Чтобы не светить токен в истории команд, можно задать его переменной окружения и
+подставлять `$TOKEN`:
+
+```bash
+TOKEN="<TOKEN из @BotFather>"
+curl "https://api.telegram.org/bot$TOKEN/setWebhook?url=https://YOUR_VERCEL_DOMAIN/api/telegram/webhook"
+curl "https://api.telegram.org/bot$TOKEN/getWebhookInfo"
+```
+
+Альтернативный вариант — браузерная строка (URL тот же, что и в `curl`).
+
+> URL кнопки «Открыть» берётся из `NEXT_PUBLIC_APP_URL` и должен совпадать с тем адресом,
+> который уже указан для Mini App в BotFather (`/newapp`). Новый Mini App создавать не нужно.
+>
+> `NEXT_PUBLIC_*` подставляется в сборку на этапе `next build`, поэтому после изменения
+> `NEXT_PUBLIC_APP_URL` в Vercel нужен **новый деплой** (redeploy), а не только перезапуск.
+
+Локальная проверка роута без реального Telegram: задайте переменную `TELEGRAM_API_BASE`
+(например, `http://127.0.0.1:3199`), поднимите мок Bot API и отправьте `POST` с любым
+Telegram Update на `/api/telegram/webhook` — так проверяется точный payload `sendMessage`
+(текст и `web_app`-кнопка). Переменная описана в `lib/telegram-bot.ts` и **не задаётся**
+в production.
+
 ## API
 
 | Метод | Endpoint | Назначение |
@@ -131,6 +201,7 @@ npm run typecheck && npm run lint
 | GET | `/api/transactions` | история виртуальных операций пользователя (пагинация) |
 | GET | `/api/leaderboard` | ТОП-30 по `totalEarned DESC` + отдельный блок текущего пользователя |
 | GET | `/api/stats` | участники, минимальная награда, выплаченные бонусы |
+| POST | `/api/telegram/webhook` | Telegram Update от Bot API: `/start` → приветствие с кнопкой «Открыть» (GET → 405) |
 
 Админ-API (`/api/admin/*`) в MVP удалён вместе с БД: задания задаются в коде,
 администрировать в статическом демо нечего.
@@ -220,7 +291,8 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
 app/            страницы (/tasks, /tasks/[id], /top, /profile) и API-роуты
 components/     layout, tasks, profile, leaderboard, transactions, telegram, theme, ui
 lib/            auth.ts + store.ts (cookie-состояние), demo-data.ts (задания и демо-рейтинг),
-                tasks.ts, telegram.ts, telegram-channels.ts, env.ts, http.ts, utils.ts,
+                tasks.ts, telegram.ts (WebApp API), telegram-bot.ts (Bot API: /start),
+                telegram-channels.ts, env.ts, http.ts, utils.ts,
                 validation.ts, types.ts, hooks.ts, dates.ts, mock-users.ts, theme-script.ts
 config/         branding.ts (название, описание, логотип, акцентный цвет #6C5CE7),
                 telegram-channels.ts (реальные каналы для задания-подписки)
