@@ -9,8 +9,9 @@ import "server-only";
  * Маркер `server-only` гарантирует, что модуль невозможно подключить из клиентского
  * компонента — сборка упадёт с понятной ошибкой (проверено).
  *
- * Замена SQLite на PostgreSQL/Turso делается в `lib/prisma.ts`
- * (провайдер в prisma/schema.prisma + адаптер) — UI и API при этом не меняются.
+ * База данных — PostgreSQL (production: Neon). Клиент и driver adapter создаются
+ * в `lib/prisma.ts`; смена провайдера затрагивает только этот файл и schema.prisma,
+ * UI и API при этом не меняются.
  */
 export { createPrismaClient, getDatabaseUrl, prisma } from "./prisma";
 export type { PrismaClient } from "./prisma";

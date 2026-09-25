@@ -43,5 +43,3 @@ next-env.d.ts
 
 # prisma
 /lib/generated
-/prisma/dev.db
-/prisma/dev.db-journal

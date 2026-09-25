@@ -18,16 +18,28 @@
 
 - Next.js 16 (App Router) + React 19 + TypeScript
 - Tailwind CSS 4 (дизайн-токены в `app/globals.css` через CSS variables)
-- Prisma 7 + driver adapter `better-sqlite3` (SQLite для разработки)
+- **Prisma 7.10 + PostgreSQL** (driver adapter `@prisma/adapter-pg` / `pg`), production — Neon
 - Zod (валидация), lucide-react (иконки), Telegram WebApp API
 
 ## Быстрый старт
 
 ```bash
 npm install                # также сгенерирует Prisma Client (postinstall)
-cp .env.example .env       # заполнить TELEGRAM_BOT_TOKEN и AUTH_SECRET
-npm run db:migrate         # создаст prisma/dev.db и применит миграции
-npm run db:seed            # 3 задания + демо-пользователь + 16 участников рейтинга
+
+# 1. Локальный Postgres (та же СУБД, что в production — Neon)
+docker run --name voxy-postgres \
+  -e POSTGRES_USER=voxy -e POSTGRES_PASSWORD=voxy_local_password -e POSTGRES_DB=voxy \
+  -p 5433:5432 -d postgres:16
+
+# 2. Переменные окружения
+cp .env.example .env
+#   DATABASE_URL="postgresql://voxy:voxy_local_password@localhost:5433/voxy?schema=public"
+#   (или строка Neon из панели Neon для локальной работы с реальной базой)
+
+# 3. Схема и демо-данные
+npm run db:deploy          # применит миграции (prisma migrate deploy)
+npm run db:seed            # 3 задания + демо-пользователь + 110 участников рейтинга
+
 npm run dev                # http://localhost:3000
 ```
 
@@ -35,7 +47,7 @@ npm run dev                # http://localhost:3000
 
 | Переменная | Назначение |
 | --- | --- |
-| `DATABASE_URL` | строка подключения к БД (локально `file:./prisma/dev.db`; читается только сервером) |
+| `DATABASE_URL` | строка подключения PostgreSQL (локально свой Postgres, в production — Neon; читается только сервером) |
 | `TELEGRAM_BOT_TOKEN` | токен бота из @BotFather. **Только сервер**, на фронтенд не попадает |
 | `AUTH_SECRET` | подпись httpOnly-сессии (`openssl rand -hex 32`), в production обязателен |
 | `ADMIN_TOKEN` | доступ к заготовке админ-API (если не задан — админ-роуты отвечают 503) |
@@ -61,33 +73,39 @@ npm run dev                # http://localhost:3000
 **Игорь Рябов, @demo_user, 360 ₽** виртуального баланса. В `production` демо-режим
 полностью отключён — запросы без валидного `initData` получают `401`.
 
-## Деплой на Vercel
+## Деплой на Vercel (Neon PostgreSQL)
 
-1. Импортируйте репозиторий в Vercel (framework определится как Next.js).
-2. В **Settings → Environment Variables** задайте (Production и Preview):
-   `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `AUTH_SECRET`, при необходимости `ADMIN_TOKEN`.
-   Только серверные переменные — без префикса `NEXT_PUBLIC_`.
-3. Build Command оставьте по умолчанию: репозиторий содержит скрипт
+1. В Neon создайте базу и скопируйте **pooled** connection string
+   (в нём уже есть `sslmode=require`).
+2. В Vercel → **Settings → Environment Variables** задайте для Production и Preview:
+   `DATABASE_URL` (строка Neon), `TELEGRAM_BOT_TOKEN`, `AUTH_SECRET`,
+   при необходимости `ADMIN_TOKEN`. Только серверные переменные — без `NEXT_PUBLIC_`.
+3. Build Command оставьте по умолчанию: в `package.json` есть скрипт
    **`vercel-build`** = `prisma generate && prisma migrate deploy && next build`
-   (Vercel использует его автоматически, если он есть в `package.json`).
-4. После деплоя укажите URL в BotFather (`/newapp`) и откройте Mini App из бота.
+   (Vercel использует его автоматически). Сборка не требует файловой БД: клиент Prisma
+   создаётся лениво, а миграции применяются к PostgreSQL.
+4. После деплоя укажите URL приложения в BotFather (`/newapp`) и откройте Mini App.
+5. При необходимости наполнить прод демо-данными — разово выполнить `npm run db:seed`
+   с production-строкой в `DATABASE_URL` (локально, не в репозитории).
 
-### ⚠️ SQLite в production
+### Миграции
 
-Локальный `file:./prisma/dev.db` — это **только для разработки**. На Vercel
-файловая система инстанса эфемерная и общая для всех инстансов не является:
-данные не сохранятся между деплоями/масштабированием. Приложение это не скрывает —
-`lib/prisma.ts` не поддерживает не-SQLite URL и падает с понятной инструкцией.
+- Активная история: `prisma/migrations/` — **initial PostgreSQL migration `0_init`**
+  (`prisma/migrations/0_init/migration.sql`), сгенерированная из текущей `schema.prisma`.
+- Прежняя SQLite-история сохранена как архив в `prisma/migrations-sqlite/` и **не применяется**.
+- Production migrations применяются командой:
 
-Рабочие варианты для прода:
+```bash
+npx prisma migrate deploy     # = npm run db:deploy
+```
 
-| Вариант | Что сделать |
-| --- | --- |
-| **Turso (libSQL)** — быстрее всего, остаёмся на `provider = "sqlite"` | `npm i @prisma/adapter-libsql`, затем `DATABASE_URL="libsql://…?authToken=…"` в Vercel. В `lib/prisma.ts` заменить создание адаптера на `new PrismaLibSQL({ url })` |
-| **PostgreSQL / Supabase** | `npm i @prisma/adapter-pg pg`, в `prisma/schema.prisma` → `provider = "postgresql"`, в `lib/prisma.ts` → `new PrismaPg({ connectionString: url })`, обновить миграции (`npm run db:migrate`) |
+`prisma migrate reset` и любые destructive-команды на production-базе не используются.
 
-UI, API и бизнес-логика при смене провайдера не меняются — всё общение с БД изолировано
-в `lib/prisma.ts` + server-only `lib/db.ts`.
+### Работа с БД
+
+`lib/prisma.ts` — единственное место, где создаётся Prisma Client (driver adapter `pg`,
+строка подключения только из `DATABASE_URL`); `lib/db.ts` — server-only фасад для приложения.
+Клиент создаётся лениво, поэтому `next build` проходит даже без `DATABASE_URL`.
 
 ## Подключение к Telegram
 
@@ -193,11 +211,17 @@ prisma/         schema.prisma, seed.ts, migrations
 (`--primary`, `--background`, `--foreground`, `--muted`, `--border`, `--success`, `--error`),
 поддержаны светлая и тёмная темы Telegram.
 
-## Переход на PostgreSQL / Supabase
+## Смена провайдера БД
 
-1. В `prisma/schema.prisma` замените `provider = "sqlite"` на `"postgresql"`.
-2. В `lib/db.ts` замените адаптер на `@prisma/adapter-pg` с `DATABASE_URL`.
-3. `npm run db:migrate` — модели и код приложения менять не нужно.
+Проект работает на PostgreSQL (`prisma/schema.prisma` → `provider = "postgresql"`).
+Если понадобится другая СУБД, менять нужно только два места:
+
+1. `prisma/schema.prisma` — `provider` в блоке `datasource` (в Prisma 7 URL в схеме не указывается);
+2. `lib/prisma.ts` — driver adapter (сейчас `@prisma/adapter-pg`).
+
+Дальше: `npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script`
+для новой initial-миграции и `npm run db:deploy`. UI, API и бизнес-логика не меняются:
+всё общение с БД изолировано в `lib/prisma.ts` + server-only `lib/db.ts`.
 
 ## Ежедневная статистика (`AppStats`)
 

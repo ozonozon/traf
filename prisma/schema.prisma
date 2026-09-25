@@ -1,8 +1,8 @@
 // VOXY — виртуальная (тренировочная) платформа заданий.
 // Все суммы в БД — виртуальные игровые рубли, а не реальные деньги.
 //
-// SQLite выбран для локальной разработки. Для перехода на PostgreSQL/Supabase
-// достаточно поменять provider + DATABASE_URL: структура моделей совместима.
+// База данных: PostgreSQL (production — Neon, через DATABASE_URL).
+// Строка подключения НЕ хранится в коде и читается только на сервере (lib/prisma.ts).
 
 generator client {
   provider = "prisma-client"
@@ -10,7 +10,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 enum TaskType {

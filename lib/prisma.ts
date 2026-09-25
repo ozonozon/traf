@@ -1,9 +1,9 @@
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 import { PrismaClient } from "./generated/prisma/client";
 
 /**
- * НИЗКОУРОВНЕВЫЙ слой доступа к БД (raw Prisma Client).
+ * НИЗКОУРОВНЕВЫЙ слой доступа к БД (raw Prisma Client) — PostgreSQL (production: Neon).
  *
  * ⚠️ Код приложения должен импортировать `@/lib/db` — он помечен `server-only`
  * и физически не может попасть в клиентский бандл. Этот модуль намеренно НЕ помечен
@@ -11,32 +11,34 @@ import { PrismaClient } from "./generated/prisma/client";
  * (обычный Node/tsx, где `server-only` бросает исключение).
  *
  * Строка подключения берётся ТОЛЬКО из переменной окружения `DATABASE_URL`
- * (в коде не захардкожена):
- *   - локальная разработка: DATABASE_URL="file:./prisma/dev.db";
- *   - production: см. README «Деплой на Vercel» (Turso/libSQL или PostgreSQL).
+ * (никаких захардкоженных connection string):
+ *   - production/Vercel: DATABASE_URL из Neon (лучше pooled-строка, sslmode=require);
+ *   - локально: свой Postgres (например, docker) в DATABASE_URL.
  */
-const DEFAULT_DATABASE_URL = "file:./prisma/dev.db";
-
 export function getDatabaseUrl(): string {
-  return process.env.DATABASE_URL?.trim() || DEFAULT_DATABASE_URL;
+  const url = process.env.DATABASE_URL?.trim();
+  if (!url) {
+    throw new Error(
+      [
+        "[db] Не задан DATABASE_URL.",
+        "Укажите строку подключения PostgreSQL, например:",
+        '  DATABASE_URL="postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require"',
+        "Локально можно поднять Postgres в docker и указать его в DATABASE_URL.",
+      ].join("\n"),
+    );
+  }
+  return url;
 }
 
-/**
- * Текущая schema объявлена как `provider = "sqlite"`, поэтому поддерживается
- * только файловая SQLite/libSQL. Для другого провайдера нужен осознанный переход,
- * а не «тихая» ошибка на прод-сервере.
- */
-function assertSupportedDatabaseUrl(url: string): void {
-  if (url.startsWith("file:")) return;
+/** Приложение работает только с PostgreSQL: SQLite больше не поддерживается. */
+function assertPostgresUrl(url: string): void {
+  if (/^postgres(ql)?:\/\//i.test(url)) return;
 
   throw new Error(
     [
-      `[db] DATABASE_URL="${url}" не поддерживается текущей Prisma schema (provider = "sqlite").`,
-      "Варианты production-подключения:",
-      '  1) Turso/libSQL: установите @prisma/adapter-libsql и задайте DATABASE_URL="libsql://…";',
-      '  2) PostgreSQL/Supabase: смените provider в prisma/schema.prisma на "postgresql",',
-      "     установите @prisma/adapter-pg и замените адаптер ниже.",
-      'Локально используйте DATABASE_URL="file:./prisma/dev.db".',
+      '[db] DATABASE_URL должен быть строкой подключения PostgreSQL (postgresql://…).',
+      "SQLite (file:…) в этом проекте больше не используется: datasource provider = \"postgresql\".",
+      "Production использует Neon PostgreSQL, локально подойдёт любой Postgres.",
     ].join("\n"),
   );
 }
@@ -45,17 +47,38 @@ const globalForPrisma = globalThis as unknown as { voxyPrisma?: PrismaClient };
 
 export function createPrismaClient(): PrismaClient {
   const url = getDatabaseUrl();
-  assertSupportedDatabaseUrl(url);
+  assertPostgresUrl(url);
 
-  // Смена провайдера = замена одной строки: new PrismaPg({ connectionString: url })
-  const adapter = new PrismaBetterSqlite3({ url });
+  // Пул соединений pg (для Neon — pooled-строка; sslmod из URL соблюдается драйвером).
+  const adapter = new PrismaPg({ connectionString: url });
   return new PrismaClient({ adapter });
 }
 
-export const prisma: PrismaClient = globalForPrisma.voxyPrisma ?? createPrismaClient();
+/**
+ * Клиент создаётся ЛЕНИВО — при первом обращении к БД.
+ * Поэтому `next build` не требует DATABASE_URL, а понятная ошибка конфигурации
+ * появляется только в момент реального запроса (а не при импорте модуля).
+ */
+function resolveClient(): PrismaClient {
+  if (globalForPrisma.voxyPrisma) return globalForPrisma.voxyPrisma;
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.voxyPrisma = prisma;
+  const created = createPrismaClient();
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma.voxyPrisma = created;
+  }
+  return created;
 }
 
+export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_target, property) {
+    const client = resolveClient();
+    const value = Reflect.get(client, property);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+  has(_target, property) {
+    return property in resolveClient();
+  },
+});
+
 export type { PrismaClient };
+
