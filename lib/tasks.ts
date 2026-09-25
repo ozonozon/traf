@@ -2,7 +2,8 @@ import "server-only";
 
 import { hasUnconfiguredChannels, publicChannels } from "@/config/telegram-channels";
 
-import type { TaskModel, TaskSubmissionModel } from "./generated/prisma/models";
+import type { DemoTask } from "./demo-data";
+import type { StoredSubmission } from "./store";
 import { TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "./task-constants";
 import type { SubmissionDto, TaskChannelDto, TaskListItemDto, TaskState } from "./types";
 
@@ -22,17 +23,18 @@ export function subscriptionTaskFields(type: string): {
 
 /** Состояние задания для конкретного пользователя. */
 export function computeTaskState(
-  task: Pick<TaskModel, "status" | "deadline">,
+  task: Pick<DemoTask, "status">,
+  deadline: Date,
   isCompletedByUser: boolean,
 ): TaskState {
   if (isCompletedByUser) return "completed";
   if (task.status === "PAUSED") return "paused";
-  if (task.status === "COMPLETED" || task.status === "EXPIRED") return "expired";
-  if (task.deadline.getTime() < Date.now()) return "expired";
+  if (task.status !== "ACTIVE") return "expired";
+  if (deadline.getTime() < Date.now()) return "expired";
   return "available";
 }
 
-export function serializeTaskSummary(task: TaskModel, state: TaskState): TaskListItemDto {
+export function serializeTaskSummary(task: DemoTask, deadline: Date, state: TaskState): TaskListItemDto {
   return {
     id: task.id,
     title: task.title,
@@ -42,18 +44,19 @@ export function serializeTaskSummary(task: TaskModel, state: TaskState): TaskLis
     type: task.type,
     virtualTarget: task.virtualTarget,
     minLength: task.minLength,
-    deadline: task.deadline.toISOString(),
+    deadline: deadline.toISOString(),
     requiresRating: task.requiresRating,
     state,
   };
 }
 
-export function serializeSubmission(submission: TaskSubmissionModel): SubmissionDto {
+export function serializeSubmission(submission: StoredSubmission): SubmissionDto {
   return {
     answer: submission.answer,
     rating: submission.rating,
     selectedOptionId: submission.selectedOptionId,
     reward: submission.reward,
-    createdAt: submission.createdAt.toISOString(),
+    createdAt: submission.createdAt,
   };
 }
+

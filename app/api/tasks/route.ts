@@ -1,6 +1,7 @@
 import { getCurrentUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { listDemoTasks, resolveDeadline } from "@/lib/demo-data";
 import { handleRouteError, jsonOk } from "@/lib/http";
+import { hasCompleted } from "@/lib/store";
 import { computeTaskState, serializeTaskSummary, subscriptionTaskFields } from "@/lib/tasks";
 
 export const runtime = "nodejs";
@@ -8,28 +9,22 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET /api/tasks
- * Доступные (ACTIVE) и завершённые по дедлайну задания. PAUSED не показывается.
+ *
+ * Тренировочные задания и прогресс текущего пользователя.
+ * Задания заданы в коде (lib/demo-data.ts), внешняя БД не используется.
+ * Дедлайн — «до 23:59» текущего дня, чтобы демо-задания всегда были доступны.
  */
 export async function GET() {
   try {
     const user = await getCurrentUser();
+    const deadline = resolveDeadline();
 
-    const tasks = await prisma.task.findMany({
-      where: { status: { in: ["ACTIVE", "EXPIRED"] } },
-      orderBy: [{ reward: "asc" }, { createdAt: "asc" }],
-    });
-
-    let completedIds = new Set<string>();
-    if (user) {
-      const submissions = await prisma.taskSubmission.findMany({
-        where: { userId: user.id, status: "APPROVED" },
-        select: { taskId: true },
-      });
-      completedIds = new Set(submissions.map((submission) => submission.taskId));
-    }
-
-    const items = tasks.map((task) => ({
-      ...serializeTaskSummary(task, computeTaskState(task, completedIds.has(task.id))),
+    const items = listDemoTasks().map((task) => ({
+      ...serializeTaskSummary(
+        task,
+        deadline,
+        computeTaskState(task, deadline, Boolean(user && hasCompleted(user, task.id))),
+      ),
       ...subscriptionTaskFields(task.type),
     }));
     const total = items.length;
@@ -43,3 +38,4 @@ export async function GET() {
     return handleRouteError(error);
   }
 }
+

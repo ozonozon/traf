@@ -3,8 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "./auth";
-import { getAdminToken } from "./env";
-import type { UserModel } from "./generated/prisma/models";
+import type { UserState } from "./store";
 
 export interface IssuePayload {
   path: string;
@@ -57,17 +56,15 @@ export function handleRouteError(error: unknown): NextResponse {
     return jsonError(error.code, error.message, error.status, error.issues, error.details);
   }
 
-  // Гонка при повторной отправке задания: сработал unique(userId, taskId).
-  if (typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002") {
-    return jsonError("TASK_ALREADY_COMPLETED", "Вы уже выполняли это задание", 409);
-  }
-
   console.error("[api] unexpected error:", error);
   return jsonError("REQUEST_FAILED", "Не удалось выполнить запрос", 500);
 }
 
-/** Пользователь из сессии или 401. userId с фронтенда никогда не принимается. */
-export async function requireUser(): Promise<UserModel> {
+/**
+ * Состояние пользователя из подписанной cookie или 401.
+ * Telegram id и userId с фронтенда никогда не принимаются как доверенные.
+ */
+export async function requireUser(): Promise<UserState> {
   const user = await getCurrentUser();
   if (!user) {
     throw new RouteError("UNAUTHORIZED", "Нужно открыть приложение внутри Telegram", 401);
@@ -75,14 +72,3 @@ export async function requireUser(): Promise<UserModel> {
   return user;
 }
 
-/** Доступ к admin API по токену из .env. Без ADMIN_TOKEN роуты выключены (503). */
-export function requireAdmin(request: Request): void {
-  const expected = getAdminToken();
-  if (!expected) {
-    throw new RouteError("ADMIN_DISABLED", "Админ-доступ не настроен", 503);
-  }
-  const provided = request.headers.get("x-admin-token");
-  if (!provided || provided !== expected) {
-    throw new RouteError("FORBIDDEN", "Недостаточно прав", 403);
-  }
-}

@@ -1,8 +1,9 @@
 import type { NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { findDemoTask, resolveDeadline } from "@/lib/demo-data";
 import { RouteError, handleRouteError, jsonOk } from "@/lib/http";
+import { findSubmission } from "@/lib/store";
 import { computeTaskState, serializeSubmission, serializeTaskSummary, subscriptionTaskFields } from "@/lib/tasks";
 
 export const runtime = "nodejs";
@@ -14,11 +15,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     const { id } = await context.params;
     const user = await getCurrentUser();
 
-    const task = await prisma.task.findUnique({
-      where: { id },
-      include: { options: { orderBy: { order: "asc" } } },
-    });
-
+    const task = findDemoTask(id);
     if (!task) {
       throw new RouteError("TASK_NOT_FOUND", "Задание не найдено", 404);
     }
@@ -26,17 +23,13 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
       throw new RouteError("TASK_NOT_ACTIVE", "Задание больше не доступно", 404);
     }
 
-    const submission = user
-      ? await prisma.taskSubmission.findUnique({
-          where: { userId_taskId: { userId: user.id, taskId: task.id } },
-        })
-      : null;
-
-    const state = computeTaskState(task, Boolean(submission));
+    const deadline = resolveDeadline();
+    const submission = user ? findSubmission(user, task.id) : null;
+    const state = computeTaskState(task, deadline, Boolean(submission));
 
     return jsonOk({
       task: {
-        ...serializeTaskSummary(task, state),
+        ...serializeTaskSummary(task, deadline, state),
         ...subscriptionTaskFields(task.type),
         conditions: task.conditions,
         options: task.options.map((option) => ({ id: option.id, text: option.text })),
@@ -47,3 +40,4 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     return handleRouteError(error);
   }
 }
+

@@ -1,17 +1,31 @@
 import { getCurrentUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { getLeaderboardBots } from "@/lib/demo-data";
 import { handleRouteError, jsonOk } from "@/lib/http";
-import { LEADERBOARD_TOP_LIMIT, ensureDailyLeaderboardUpdate } from "@/lib/leaderboard-daily";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** Размер ТОП-списка. */
+const LEADERBOARD_TOP_LIMIT = 30;
+
+interface LeaderboardRow {
+  id: string;
+  firstName: string;
+  lastName: string | null;
+  username: string | null;
+  photoUrl: string | null;
+  totalEarned: number;
+  completedTasks: number;
+  isCurrentUser: boolean;
+}
+
 /**
  * GET /api/leaderboard
  *
- * Перед выдачей списка один раз в сутки выполняется daily update
- * (см. lib/leaderboard-daily.ts): часть участников получает прибавку,
- * добавляются новые demo-участники. Повторные вызовы в тот же день ничего не меняют.
+ * Демонстрационные участники формируются детерминированно из текущей даты
+ * (см. lib/demo-data.ts): значения одинаковы для всех пользователей и не меняются
+ * в течение дня, а каждый следующий день часть участников получает прибавку.
+ * Повторные запросы ничего не «накручивают»: список пересчитывается, а не хранится.
  *
  * Ответ: ТОП-30 по totalEarned DESC + отдельный блок текущего пользователя,
  * который не обязан входить в ТОП-30.
@@ -20,50 +34,57 @@ export async function GET() {
   try {
     const currentUser = await getCurrentUser();
 
-    // Идемпотентно: уникальная дата в LeaderboardDailyUpdate защищает от повторных запусков.
-    await ensureDailyLeaderboardUpdate();
-
-    const [total, top] = await Promise.all([
-      prisma.user.count(),
-      prisma.user.findMany({
-        orderBy: [{ totalEarned: "desc" }, { createdAt: "asc" }],
-        take: LEADERBOARD_TOP_LIMIT,
-      }),
-    ]);
-
-    const entries = top.map((user, index) => ({
-      rank: index + 1,
-      id: user.id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      username: user.username,
-      photoUrl: user.photoUrl,
-      totalEarned: user.totalEarned,
-      completedTasks: user.completedTasks,
-      isCurrentUser: currentUser?.id === user.id,
+    const rows: LeaderboardRow[] = getLeaderboardBots().map((bot) => ({
+      id: bot.id,
+      firstName: bot.firstName,
+      lastName: bot.lastName,
+      username: bot.username,
+      photoUrl: null,
+      totalEarned: bot.totalEarned,
+      completedTasks: bot.completedTasks,
+      isCurrentUser: false,
     }));
 
-    let currentUserEntry = null;
     if (currentUser) {
-      const betterEarnedCount = await prisma.user.count({
-        where: { totalEarned: { gt: currentUser.totalEarned } },
-      });
-      const rank = betterEarnedCount + 1;
-      currentUserEntry = {
-        rank,
+      rows.push({
+        id: `self-${currentUser.telegramId}`,
         firstName: currentUser.firstName,
         lastName: currentUser.lastName,
         username: currentUser.username,
         photoUrl: currentUser.photoUrl,
         totalEarned: currentUser.totalEarned,
         completedTasks: currentUser.completedTasks,
-        isInTop: rank <= LEADERBOARD_TOP_LIMIT,
-      };
+        isCurrentUser: true,
+      });
     }
+
+    // По убыванию заработка; при равенстве демо-участники выше реального пользователя
+    // (как раньше: демо-профили создавались раньше и сортировались по createdAt asc).
+    rows.sort(
+      (left, right) =>
+        right.totalEarned - left.totalEarned || Number(left.isCurrentUser) - Number(right.isCurrentUser),
+    );
+
+    const entries = rows.slice(0, LEADERBOARD_TOP_LIMIT).map((row, index) => ({ rank: index + 1, ...row }));
+    const selfIndex = rows.findIndex((row) => row.isCurrentUser);
+
+    const currentUserEntry =
+      currentUser && selfIndex >= 0
+        ? {
+            rank: selfIndex + 1,
+            firstName: currentUser.firstName,
+            lastName: currentUser.lastName,
+            username: currentUser.username,
+            photoUrl: currentUser.photoUrl,
+            totalEarned: currentUser.totalEarned,
+            completedTasks: currentUser.completedTasks,
+            isInTop: selfIndex + 1 <= LEADERBOARD_TOP_LIMIT,
+          }
+        : null;
 
     return jsonOk({
       entries,
-      total,
+      total: rows.length,
       topLimit: LEADERBOARD_TOP_LIMIT,
       currentUser: currentUserEntry,
     });
@@ -71,3 +92,4 @@ export async function GET() {
     return handleRouteError(error);
   }
 }
+

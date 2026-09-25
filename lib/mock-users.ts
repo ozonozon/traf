@@ -1,22 +1,16 @@
 /**
  * Генератор demo-участников рейтинга (ботов).
  *
- * «Плоский» модуль без обращения к БД, поэтому его используют и серверный
- * daily-сервис, и CLI-скрипт `prisma/seed.ts`.
- * Никаких реальных людей: имена/username собираются из заранее заданных пулов.
+ * «Плоский» модуль без обращения к БД и без `server-only`, поэтому его использует
+ * серверный слой `lib/demo-data.ts`.
+ * Никаких реальных людей: имена/username собираются из заранее заданных пулов,
+ * а одинаковый результат на одинаковом seed даёт детерминированный LCG.
  */
-import crypto from "node:crypto";
 
 export interface RandomSource {
   int: (min: number, max: number) => number;
   pick: <T>(values: T[]) => T;
 }
-
-/** Криптостойкий источник случайности (ежедневные обновления рейтинга). */
-export const cryptoRandom: RandomSource = {
-  int: (min, max) => crypto.randomInt(min, max + 1),
-  pick: (values) => values[crypto.randomInt(0, values.length)],
-};
 
 /** Детерминированный LCG — чтобы seed давал одинаковые данные при каждом запуске. */
 export function createSeededRandom(seed: number): RandomSource {

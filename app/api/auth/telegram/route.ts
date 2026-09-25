@@ -1,12 +1,11 @@
 import type { NextRequest } from "next/server";
 
 import {
-  ensureDemoUser,
   getCurrentUser,
   isDemoAllowed,
-  setSessionCookie,
+  signInAsDemo,
+  signInWithTelegram,
   toPublicUser,
-  upsertTelegramUser,
   validateTelegramInitData,
 } from "@/lib/auth";
 import { RouteError, handleRouteError, jsonOk } from "@/lib/http";
@@ -33,6 +32,8 @@ export async function POST(request: NextRequest) {
 
     const botToken = getTelegramBotToken();
     const { initData } = parsed.data;
+    // Состояние предыдущего визита: профиль обновляем, заработанное сохраняем.
+    const current = await getCurrentUser();
 
     // 1. Валидный Telegram initData.
     if (initData && botToken) {
@@ -40,15 +41,13 @@ export async function POST(request: NextRequest) {
       if (!verification.valid || !verification.user) {
         throw new RouteError("INVALID_INIT_DATA", "Не удалось проверить данные Telegram", 401);
       }
-      const user = await upsertTelegramUser(verification.user);
-      await setSessionCookie(user.id);
+      const user = await signInWithTelegram(current, verification.user);
       return jsonOk({ user: toPublicUser(user), mode: "telegram" });
     }
 
     // 2. Локальная разработка вне Telegram (в production выключено).
     if (isDemoAllowed()) {
-      const user = await ensureDemoUser();
-      await setSessionCookie(user.id);
+      const user = await signInAsDemo(current);
       return jsonOk({ user: toPublicUser(user), mode: "demo" });
     }
 

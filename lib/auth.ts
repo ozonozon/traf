@@ -2,17 +2,19 @@ import "server-only";
 
 import crypto from "node:crypto";
 
-import { cookies } from "next/headers";
-
-import { getAuthSecret, isProduction } from "./env";
-import { prisma } from "./db";
-import type { UserModel } from "./generated/prisma/models";
+import { isProduction } from "./env";
+import {
+  createDemoState,
+  createTelegramState,
+  readUserState,
+  refreshTelegramProfile,
+  saveUserState,
+  type UserState,
+} from "./store";
 import type { TelegramUser } from "./telegram";
 
-export { DEMO_BALANCE, DEMO_TELEGRAM_ID, ensureDemoUser, toPublicUser, upsertTelegramUser } from "./users";
+export { toPublicUser } from "./store";
 
-export const SESSION_COOKIE = "voxy_session";
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const INIT_DATA_MAX_AGE_SECONDS = 60 * 60 * 24;
 
 /** Демо-режим разрешён только вне production. */
@@ -69,74 +71,28 @@ export function validateTelegramInitData(
   return { valid: true, user, authDate: new Date(authDateSeconds * 1000) };
 }
 
-// --- Сессия (подписанная httpOnly cookie) ---
+// --- Сессия (подписанная httpOnly-cookie с состоянием пользователя) ---
 
-function authSecret(): string {
-  return getAuthSecret();
+/** Текущее состояние пользователя или null (например, до авторизации). */
+export async function getCurrentUser(): Promise<UserState | null> {
+  return readUserState();
 }
 
-function signPayload(payload: string): string {
-  return crypto.createHmac("sha256", authSecret()).update(payload).digest("base64url");
+/** Вход по данным Telegram: профиль обновляется, заработанное сохраняется. */
+export async function signInWithTelegram(
+  current: UserState | null,
+  telegramUser: TelegramUser,
+): Promise<UserState> {
+  const next = current ? refreshTelegramProfile(current, telegramUser) : createTelegramState(telegramUser);
+  await saveUserState(next);
+  return next;
 }
 
-export function createSessionToken(userId: string): string {
-  const payload = Buffer.from(
-    JSON.stringify({ uid: userId, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS }),
-  ).toString("base64url");
-  return `${payload}.${signPayload(payload)}`;
+/** Вход в демо-режиме (локальная разработка вне Telegram). */
+export async function signInAsDemo(current: UserState | null): Promise<UserState> {
+  const next = current?.isDemo ? current : createDemoState();
+  await saveUserState(next);
+  return next;
 }
 
-export function readSessionToken(token: string | undefined): { userId: string } | null {
-  if (!token) return null;
-  const [payload, signature] = token.split(".");
-  if (!payload || !signature) return null;
-
-  const expected = Buffer.from(signPayload(payload), "utf8");
-  const received = Buffer.from(signature, "utf8");
-  if (expected.length !== received.length) return null;
-  if (!crypto.timingSafeEqual(expected, received)) return null;
-
-  try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
-      uid?: string;
-      exp?: number;
-    };
-    if (!parsed.uid || !parsed.exp) return null;
-    if (parsed.exp < Math.floor(Date.now() / 1000)) return null;
-    return { userId: parsed.uid };
-  } catch {
-    return null;
-  }
-}
-
-export async function setSessionCookie(userId: string): Promise<void> {
-  const store = await cookies();
-  store.set(SESSION_COOKIE, createSessionToken(userId), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: isProduction(),
-    path: "/",
-    maxAge: SESSION_TTL_SECONDS,
-  });
-}
-
-export async function clearSessionCookie(): Promise<void> {
-  const store = await cookies();
-  store.delete(SESSION_COOKIE);
-}
-
-export async function getSessionUserId(): Promise<string | null> {
-  const store = await cookies();
-  const session = readSessionToken(store.get(SESSION_COOKIE)?.value);
-  return session?.userId ?? null;
-}
-
-/** Текущий пользователь из сессии (или null). */
-export async function getCurrentUser(): Promise<UserModel | null> {
-  const userId = await getSessionUserId();
-  if (!userId) return null;
-  return prisma.user.findUnique({ where: { id: userId } });
-}
-
-// Провижининг пользователей вынесен в lib/users.ts (переиспользуется в seed).
 
