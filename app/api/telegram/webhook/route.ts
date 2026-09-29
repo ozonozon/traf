@@ -1,24 +1,18 @@
 import { NextResponse } from "next/server";
 
-import { getMiniAppUrl, getTelegramBotToken } from "@/lib/env";
-import { START_MESSAGE_TEXT, buildOpenMiniAppKeyboard, sendTelegramMessage } from "@/lib/telegram-bot";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/**
- * POST /api/telegram/webhook — Telegram Update от Bot API.
- *
- * Обрабатывается только команда /start (в том числе `/start <payload>` и
- * `/start@botname`): бот отправляет приветствие с inline-кнопкой «Открыть»,
- * которая открывает существующий Mini App. Любые другие update игнорируются
- * и не приводят к ошибке.
- *
- * Никаких состояний и БД: повторный /start всегда отправляет то же сообщение.
- * Полный Telegram Update в логи не пишется.
- */
+/** Текст приветствия на /start. */
+const START_TEXT =
+  "Привет! Твои задания уже ждут тебя, нажимай кнопку внизу «Открыть», выполняй их и зарабатывай реальные деньги!";
 
-/** Минимальный срез Telegram Update, который нужен этому роуту. */
+/** Telegram присылает Update только методом POST. */
+export async function GET() {
+  return NextResponse.json({ ok: false, error: "METHOD_NOT_ALLOWED" }, { status: 405 });
+}
+
+/** Минимальный срез Telegram Update. */
 interface TelegramUpdate {
   message?: {
     text?: string;
@@ -26,61 +20,66 @@ interface TelegramUpdate {
   };
 }
 
-function json(body: Record<string, unknown>, status = 200): NextResponse {
-  return NextResponse.json(body, { status });
-}
-
-/** `/start`, `/start payload`, `/start@botname`, `/start@botname payload`. */
-function isStartCommand(text: string): boolean {
-  const command = text.trim().split(/\s+/)[0]?.split("@")[0]?.toLowerCase();
-  return command === "/start";
-}
-
-/** Webhook принимает только POST: GET отвечает 405. */
-export async function GET(): Promise<NextResponse> {
-  return NextResponse.json(
-    { ok: false, error: "METHOD_NOT_ALLOWED" },
-    { status: 405, headers: { Allow: "POST" } },
-  );
-}
-
-export async function POST(request: Request): Promise<NextResponse> {
-  // 1. Конфигурация: без токена и без адреса Mini App работать нельзя.
-  if (!getTelegramBotToken()) {
-    console.error("[telegram-webhook] TELEGRAM_BOT_TOKEN не настроен");
-    return json({ ok: false, error: "BOT_NOT_CONFIGURED" }, 503);
-  }
-
-  const appUrl = getMiniAppUrl();
-  if (!appUrl) {
-    console.error("[telegram-webhook] NEXT_PUBLIC_APP_URL не настроен");
-    return json({ ok: false, error: "APP_URL_NOT_CONFIGURED" }, 503);
-  }
-
-  // 2. Тело запроса: битый JSON и любые чужие типы update не должны ломать endpoint.
+/**
+ * POST /api/telegram/webhook — Update от Telegram Bot API.
+ *
+ * /start → sendMessage с кнопкой «Открыть» (Web App).
+ * Всё остальное игнорируется.
+ */
+export async function POST(request: Request) {
   const update = (await request.json().catch(() => null)) as TelegramUpdate | null;
+
   const text = update?.message?.text;
   const chatId = update?.message?.chat?.id;
 
-  if (typeof text !== "string" || typeof chatId !== "number") {
-    return json({ ok: true, ignored: true });
+  // Не /start (или нечего отправлять) — ничего не делаем.
+  if (typeof text !== "string" || !text.startsWith("/start") || typeof chatId !== "number") {
+    return NextResponse.json({ ok: true, ignored: true });
   }
 
-  if (!isStartCommand(text)) {
-    return json({ ok: true, ignored: true });
+  let response: Response | null = null;
+  try {
+    response = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: START_TEXT,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "Открыть",
+                web_app: {
+                  url: process.env.NEXT_PUBLIC_APP_URL,
+                },
+              },
+            ],
+          ],
+        },
+      }),
+    });
+  } catch {
+    // Сетевая ошибка: URL с токеном в ответ не попадает.
+    response = null;
   }
 
-  // 3. Ответ уходит ровно в тот чат, откуда пришло сообщение (message.chat.id).
-  const result = await sendTelegramMessage(chatId, START_MESSAGE_TEXT, buildOpenMiniAppKeyboard(appUrl));
+  const payload = response ? ((await response.json().catch(() => null)) as { ok?: boolean; description?: string } | null) : null;
 
-  if (!result.ok) {
-    // Безопасный лог: без токена и без полного update.
-    console.error(
-      `[telegram-webhook] sendMessage не удалось (chat_id=${chatId}, code=${result.errorCode ?? "-"}): ${result.error ?? "неизвестная ошибка"}`,
+  if (!response || !payload?.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        delivered: false,
+        error: "TELEGRAM_API_ERROR",
+        // Только описание от Telegram (токен не раскрывается).
+        details: payload?.description ?? "Telegram API недоступен",
+      },
+      { status: 500 },
     );
-    // 200, чтобы Telegram не повторял один и тот же update бесконечно.
-    return json({ ok: true, delivered: false });
   }
 
-  return json({ ok: true, delivered: true });
+  return NextResponse.json({ ok: true, delivered: true });
 }
+

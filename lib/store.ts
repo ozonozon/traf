@@ -180,7 +180,10 @@ export async function saveUserState(state: UserState): Promise<void> {
 
   store.set(STATE_COOKIE, encodeState(normalized), {
     httpOnly: true,
-    sameSite: "lax",
+    // В production приложение может открываться внутри iframe (Telegram Web/Desktop),
+    // поэтому cookie должна быть доступна и в стороннем контексте: SameSite=None + Secure.
+    // Локально (http) браузеры такие cookie не принимают, поэтому там остаётся Lax.
+    sameSite: isProduction() ? "none" : "lax",
     secure: isProduction(),
     path: "/",
     maxAge: STATE_TTL_SECONDS,

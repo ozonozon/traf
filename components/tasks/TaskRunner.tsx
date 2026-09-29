@@ -2,13 +2,10 @@
 
 import { useState } from "react";
 
-import { copy } from "@/config/branding";
-
 import { useSession } from "@/components/telegram/TelegramProvider";
 import { Button } from "@/components/ui/Button";
 import { Stars } from "@/components/ui/Stars";
 import { useToast } from "@/components/ui/Toast";
-import { VirtualNote } from "@/components/ui/VirtualNote";
 import { apiFetch, isApiError } from "@/lib/api";
 import { hapticNotification, hapticSelection } from "@/lib/telegram";
 import type { SubmissionResponseDto, TaskDetailDto } from "@/lib/types";
@@ -153,8 +150,6 @@ export function TaskRunner({ task }: { task: TaskDetailDto }) {
           </div>
         </section>
       ) : null}
-
-      <VirtualNote>{copy.virtualMoneyNotice}</VirtualNote>
 
       <div className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[900px] border-t border-border bg-card/95 px-5 pt-3 pb-[calc(14px+env(safe-area-inset-bottom,0px))] backdrop-blur-md">
         <Button onClick={handleSubmit} disabled={isDisabled} isLoading={isSubmitting}>

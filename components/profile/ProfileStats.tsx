@@ -1,13 +1,22 @@
 import { formatAmount, formatRub } from "@/lib/utils";
 import type { ProfileStatsDto } from "@/lib/types";
 
+/**
+ * Значения статистики, которые могут быть неизвестны, если данные профиля недоступны
+ * (например, cookie не дошла до сервера): такие ячейки показываются как «—».
+ */
+export type ProfileStatsView = Pick<ProfileStatsDto, "completedTasks" | "totalEarned"> & {
+  completedToday: number | null;
+  rank: number | null;
+};
+
 /** Статистика профиля: задания, заработок, сегодня, место в рейтинге. */
-export function ProfileStats({ stats }: { stats: ProfileStatsDto }) {
+export function ProfileStats({ stats }: { stats: ProfileStatsView }) {
   const items = [
     { label: "Заданий", value: formatAmount(stats.completedTasks) },
     { label: "Заработано", value: formatRub(stats.totalEarned) },
-    { label: "Сегодня", value: formatAmount(stats.completedToday) },
-    { label: "В рейтинге", value: `#${formatAmount(stats.rank)}` },
+    { label: "Сегодня", value: stats.completedToday === null ? "—" : formatAmount(stats.completedToday) },
+    { label: "В рейтинге", value: stats.rank === null ? "—" : `#${formatAmount(stats.rank)}` },
   ];
 
   return (

@@ -9,10 +9,8 @@ import { BalancePill } from "@/components/layout/BalancePill";
 import { TaskRunner } from "@/components/tasks/TaskRunner";
 import { TelegramSubscription } from "@/components/tasks/TelegramSubscription";
 import { useSession } from "@/components/telegram/TelegramProvider";
-import { VirtualNote } from "@/components/ui/VirtualNote";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
-import { copy } from "@/config/branding";
 import { useApi } from "@/lib/hooks";
 import { TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "@/lib/task-constants";
 import type { TaskDetailResponseDto } from "@/lib/types";
@@ -83,12 +81,6 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                 </span>
               </div>
             </section>
-
-            {isSubscriptionTask ? null : (
-              <VirtualNote>
-                {copy.virtualNotice} Отзыв от {task.minLength} символов.
-              </VirtualNote>
-            )}
 
             <section className="card-surface p-5">
               <h2 className="text-[17px]">Условия задания</h2>

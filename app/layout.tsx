@@ -14,7 +14,12 @@ export const metadata: Metadata = {
   description:
     "Тренировочный симулятор платформы заданий: выполняйте виртуальные задания и получайте виртуальные рубли внутри приложения.",
   applicationName: branding.name,
+  icons: {
+    icon: [{ url: branding.logoUrl, type: "image/png" }],
+    apple: [{ url: branding.logoUrl, type: "image/png" }],
+  },
 };
+
 
 export const viewport: Viewport = {
   width: "device-width",

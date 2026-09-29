@@ -4,7 +4,7 @@ import { AppFrame } from "@/components/layout/AppFrame";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { BalanceCard } from "@/components/profile/BalanceCard";
 import { ProfileIdentity } from "@/components/profile/ProfileIdentity";
-import { ProfileStats } from "@/components/profile/ProfileStats";
+import { ProfileStats, type ProfileStatsView } from "@/components/profile/ProfileStats";
 import { TransactionList } from "@/components/transactions/TransactionList";
 import { ThemeSwitcherRow, ThemeToggleButton } from "@/components/theme/ThemeSwitcher";
 import { useSession } from "@/components/telegram/TelegramProvider";
@@ -13,14 +13,37 @@ import { ErrorState } from "@/components/ui/States";
 import { useApi } from "@/lib/hooks";
 import type { ProfileResponseDto } from "@/lib/types";
 
-/** Экран «Профиль»: человек из Telegram, виртуальный баланс, статистика, история. */
+/**
+ * Экран «Профиль»: человек из Telegram, виртуальный баланс, статистика, история.
+ *
+ * Данные берутся из двух источников: ответ /api/profile (подписанное состояние из cookie)
+ * и уже полученный при авторизации пользователь из сессии. Если запрос профиля не прошёл
+ * (например, клиент Telegram не отдал cookie), экран всё равно показывает доступные данные
+ * из локального состояния, а не ошибку загрузки.
+ */
 export default function ProfilePage() {
   const session = useSession();
-  // Ждём bootstrap сессии, иначе первый запрос уйдёт без cookie и вернёт 401.
-  const { data, error, isLoading, refresh } = useApi<ProfileResponseDto>(
-    session.isLoading ? null : "/api/profile",
-  );
+  // Ждём bootstrap сессии, иначе первый запрос уйдёт без cookie.
+  const { data, isLoading, refresh } = useApi<ProfileResponseDto>(session.isLoading ? null : "/api/profile");
   const isPending = session.isLoading || isLoading;
+
+  const user = data?.user ?? session.user;
+  const isFromServer = data !== null;
+  const stats: ProfileStatsView | null =
+    data?.stats ??
+    (user
+      ? {
+          completedTasks: user.completedTasks,
+          totalEarned: user.totalEarned,
+          completedToday: null,
+          rank: null,
+        }
+      : null);
+
+  function handleRetry() {
+    session.retry();
+    refresh();
+  }
 
   return (
     <AppFrame>
@@ -48,23 +71,19 @@ export default function ProfilePage() {
               ))}
             </div>
           </div>
-        ) : error || !data ? (
-          <div className="mt-5">
-            <ErrorState onRetry={refresh} />
-          </div>
-        ) : (
+        ) : user && stats ? (
           <>
-            <ProfileIdentity user={data.user} />
+            <ProfileIdentity user={user} />
 
-            {data.user.isDemo ? (
+            {user.isDemo ? (
               <p className="mt-3 rounded-[14px] bg-surface px-3 py-2 text-[12px] text-muted">
                 Демо-режим: приложение открыто вне Telegram (только для локальной разработки).
               </p>
             ) : null}
 
-            <BalanceCard balance={data.user.balance} totalEarned={data.user.totalEarned} />
+            <BalanceCard balance={user.balance} totalEarned={user.totalEarned} />
 
-            <ProfileStats stats={data.stats} />
+            <ProfileStats stats={stats} />
 
             <section className="mt-4 overflow-hidden rounded-[24px] border border-border bg-card">
               <ThemeSwitcherRow />
@@ -74,12 +93,27 @@ export default function ProfilePage() {
               <h2 className="text-[22px] tracking-[-0.02em]">История операций</h2>
               <p className="mt-1.5 text-[13px] text-muted">Все начисления — виртуальные</p>
               <div className="mt-3.5">
-                <TransactionList />
+                {isFromServer ? (
+                  <TransactionList />
+                ) : (
+                  <p className="rounded-[18px] border border-border bg-surface px-3.5 py-3 text-[12.5px] leading-snug text-muted">
+                    История операций и место в рейтинге подгружаются, когда приложение открыто внутри Telegram.
+                  </p>
+                )}
               </div>
             </section>
           </>
+        ) : (
+          <div className="mt-5">
+            <ErrorState
+              title="Профиль недоступен"
+              description="Откройте приложение внутри Telegram и обновите экран — данные появятся автоматически."
+              onRetry={handleRetry}
+            />
+          </div>
         )}
       </main>
     </AppFrame>
   );
 }
+

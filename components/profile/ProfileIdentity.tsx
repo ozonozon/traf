@@ -1,7 +1,8 @@
 import { Avatar } from "@/components/ui/Avatar";
+import { branding } from "@/config/branding";
 import type { PublicUserDto } from "@/lib/types";
 
-/** Аватар + имя + @username + подпись «исполнитель VOXY». */
+/** Аватар + имя + @username + подпись «исполнитель PayDoEarn». */
 export function ProfileIdentity({ user }: { user: PublicUserDto }) {
   const fullName = `${user.firstName} ${user.lastName ?? ""}`.trim();
 
@@ -19,7 +20,7 @@ export function ProfileIdentity({ user }: { user: PublicUserDto }) {
         <p className="truncate text-[22px] leading-tight font-extrabold tracking-[-0.02em]">{fullName}</p>
         {user.username ? <p className="mt-1 truncate text-[14px] text-muted">@{user.username}</p> : null}
         <span className="mt-2 inline-flex rounded-full bg-primary-soft px-2.5 py-1 text-[11.5px] font-bold text-primary">
-          исполнитель VOXY
+          исполнитель {branding.name}
         </span>
       </div>
     </div>

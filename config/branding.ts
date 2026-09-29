@@ -3,16 +3,15 @@
  * Название, описание, логотип и основной цвет меняются только здесь.
  */
 export const branding = {
-  name: "VOXY",
+  name: "PayDoEarn",
   description: "платформа заданий",
-  logo: "V",
+  /** Иконка приложения лежит в public/ и отдаётся по этому пути. */
+  logoUrl: "/paydoearn-icon.png",
   primaryColor: "#6C5CE7",
 } as const;
 
 export const copy = {
-  /** Дисклеймер: приложение — симулятор, деньги виртуальные. */
-  virtualNotice: "Тренировочное задание. Текст не публикуется на внешних площадках.",
-  virtualMoneyNotice: "Текст и оценка используются только внутри тренировочного приложения. Никуда не публикуются.",
   currency: "₽",
   currencyName: "виртуальные рубли",
 } as const;
+
