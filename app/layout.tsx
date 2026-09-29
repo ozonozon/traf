@@ -37,6 +37,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="ru" suppressHydrationWarning>
       <head>
         {/*
+          Официальный Telegram WebApp SDK. Без него window.Telegram не существует,
+          initData пустой, авторизация на сервере не проходит и профиль остаётся
+          без данных. Скрипт должен выполниться до гидратации приложения, поэтому
+          он подключается в <head> синхронно (как рекомендует документация Telegram).
+        */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script src="https://telegram.org/js/telegram-web-app.js" />
+        {/*
           Тема применяется до первой отрисовки: сохранённый режим -> Telegram colorScheme
           -> prefers-color-scheme -> light. Это исключает мигание светлого экрана.
         */}

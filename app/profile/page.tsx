@@ -110,6 +110,9 @@ export default function ProfilePage() {
               description="Откройте приложение внутри Telegram и обновите экран — данные появятся автоматически."
               onRetry={handleRetry}
             />
+            {session.error?.code ? (
+              <p className="mt-2 text-center text-[12px] text-muted">Код ошибки: {session.error.code}</p>
+            ) : null}
           </div>
         )}
       </main>

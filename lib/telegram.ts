@@ -1,7 +1,10 @@
 /**
  * Обёртка над Telegram WebApp API.
  * Все методы безопасны вне Telegram: возвращают null/no-op, приложение не падает.
+ * Требует, чтобы в <head> был подключён telegram-web-app.js (см. app/layout.tsx).
  */
+
+import type { PublicUserDto } from "./types";
 
 export interface TelegramUser {
   id: number;
@@ -91,6 +94,27 @@ export function getInitData(): string {
 /** Пользователь из initDataUnsafe (только для UI, доверять можно лишь серверу). */
 export function getTelegramUser(): TelegramUser | null {
   return getWebApp()?.initDataUnsafe?.user ?? null;
+}
+
+/**
+ * Локальный пользователь для отображения, когда серверная сессия недоступна.
+ *
+ * Имя, @username и аватар берутся из Telegram (initDataUnsafe — непроверенные данные,
+ * они используются только для показа). Денежные значения — нули: настоящие суммы живут
+ * в подписанном состоянии на сервере, и как только сессия появится, профиль перезапишется
+ * серверными данными. Это предохранитель, чтобы экран профиля не оставался пустым.
+ */
+export function toLocalUser(telegramUser: TelegramUser): PublicUserDto {
+  return {
+    username: telegramUser.username ?? null,
+    firstName: telegramUser.first_name || "Пользователь",
+    lastName: telegramUser.last_name ?? null,
+    photoUrl: telegramUser.photo_url ?? null,
+    balance: 0,
+    totalEarned: 0,
+    completedTasks: 0,
+    isDemo: false,
+  };
 }
 
 export function getThemeParams(): Record<string, string | undefined> {

@@ -12,7 +12,7 @@ import {
 } from "react";
 
 import { apiFetch, isApiError, type ApiError } from "@/lib/api";
-import { getInitData, hideBackButton, initTelegram, showBackButton } from "@/lib/telegram";
+import { getInitData, getTelegramUser, hideBackButton, initTelegram, showBackButton, toLocalUser } from "@/lib/telegram";
 import type { AuthResponseDto, ProfileResponseDto, PublicUserDto } from "@/lib/types";
 
 interface SessionValue {
@@ -38,6 +38,16 @@ function toApiError(cause: unknown): ApiError {
   return Object.assign(new Error("Auth failed"), { code: "REQUEST_FAILED", status: 0 }) as ApiError;
 }
 
+/**
+ * Пользователь для отображения, когда серверный вход не удался: имя, @username и аватар
+ * из Telegram. Так профиль и шапка не остаются пустыми, а суммы подтянутся, как только
+ * сессия появится (регистрация состояния идёт через подписанную cookie на сервере).
+ */
+function localUserFromTelegram(): PublicUserDto | null {
+  const telegramUser = getTelegramUser();
+  return telegramUser ? toLocalUser(telegramUser) : null;
+}
+
 export function TelegramProvider({ children }: { children: ReactNode }) {
   const [nonce, setNonce] = useState(0);
   const [state, setState] = useState<SessionState | null>(null);
@@ -57,7 +67,7 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
-        setState({ key: nonce, user: null, error: toApiError(cause) });
+        setState({ key: nonce, user: localUserFromTelegram(), error: toApiError(cause) });
       });
 
     return () => {
