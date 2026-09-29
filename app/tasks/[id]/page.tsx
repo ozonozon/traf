@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowLeft, Clock } from "lucide-react";
+import { ArrowLeft, Clock, Lock } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use } from "react";
 
@@ -12,7 +13,7 @@ import { useSession } from "@/components/telegram/TelegramProvider";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { useApi } from "@/lib/hooks";
-import { TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "@/lib/task-constants";
+import { TELEGRAM_SUBSCRIPTION_TASK_ID, TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "@/lib/task-constants";
 import type { TaskDetailResponseDto } from "@/lib/types";
 import { formatDeadline, formatRub } from "@/lib/utils";
 
@@ -82,13 +83,36 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             </section>
 
-            <section className="card-surface p-5">
-              <h2 className="text-[17px]">Условия задания</h2>
-              <p className="mt-2.5 text-[14.5px] leading-snug">{task.conditions}</p>
-              <p className="mt-2.5 text-[12.5px] text-muted">Виртуальный объект: {task.virtualTarget}</p>
-            </section>
+            {task.state === "locked" ? (
+              <section className="card-surface p-5">
+                <div className="flex size-12 items-center justify-center rounded-[16px] bg-primary-soft text-primary">
+                  <Lock size={22} />
+                </div>
+                <h2 className="mt-3.5 text-[19px]">Задание пока недоступно</h2>
+                <p className="mt-2 text-[14.5px] leading-snug text-muted">
+                  Сначала выполните обязательное задание «Подписка на Telegram-каналы»: отправьте заявки на все три
+                  канала. После того как Telegram подтвердит заявки, остальные задания откроются автоматически.
+                </p>
+                <Link
+                  href={`/tasks/${TELEGRAM_SUBSCRIPTION_TASK_ID}`}
+                  className="pressable mt-4 flex h-[54px] items-center justify-center rounded-[24px] bg-primary text-[16px] font-bold text-white"
+                >
+                  К заданию «Подписка»
+                </Link>
+              </section>
+            ) : (
+              <section className="card-surface p-5">
+                <h2 className="text-[17px]">Условия задания</h2>
+                <p className="mt-2.5 text-[14.5px] leading-snug">{task.conditions}</p>
+                <p className="mt-2.5 text-[12.5px] text-muted">Виртуальный объект: {task.virtualTarget}</p>
+              </section>
+            )}
 
-            {isSubscriptionTask ? <TelegramSubscription task={task} /> : <TaskRunner task={task} />}
+            {task.state === "locked" ? null : isSubscriptionTask ? (
+              <TelegramSubscription task={task} />
+            ) : (
+              <TaskRunner task={task} />
+            )}
           </div>
         ) : (
           <ErrorState title="Задание не найдено" description="Возможно, оно уже недоступно" onRetry={refresh} />

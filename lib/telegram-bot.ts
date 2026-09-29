@@ -5,9 +5,9 @@ import { getTelegramBotToken } from "./env";
 /**
  * Минимальный клиент Telegram Bot API: только sendMessage.
  *
- * Никаких SDK, polling и состояний — обычный server-side fetch (тот же подход,
- * что в lib/telegram-channels.ts). Модуль помечен `server-only`, поэтому токен
- * физически не может попасть в клиентский бандл.
+ * Никаких SDK, polling и состояний — обычный server-side fetch.
+ * Модуль помечен `server-only`, поэтому токен физически не может попасть
+ * в клиентский бандл.
  */
 
 const DEFAULT_API_BASE = "https://api.telegram.org";

@@ -59,8 +59,37 @@ export interface UserState {
   totalEarned: number;
   completedTasks: number;
   isDemo: boolean;
+  /** Заявки на вступление в каналы, полученные Telegram (chat_join_request). */
+  channel1Requested: boolean;
+  channel2Requested: boolean;
+  channel3Requested: boolean;
   submissions: StoredSubmission[];
   transactions: StoredTransaction[];
+}
+
+/** Номер канала задания «Подписка на Telegram-каналы». */
+export type ChannelIndex = 1 | 2 | 3;
+
+const CHANNEL_FLAG_KEYS: Record<ChannelIndex, "channel1Requested" | "channel2Requested" | "channel3Requested"> = {
+  1: "channel1Requested",
+  2: "channel2Requested",
+  3: "channel3Requested",
+};
+
+/** Была ли получена от Telegram заявка на этот канал. */
+export function isChannelRequested(state: UserState, index: ChannelIndex): boolean {
+  return state[CHANNEL_FLAG_KEYS[index]] === true;
+}
+
+/** Отмечает канал как «заявка получена» (возвращает новое состояние). */
+export function markChannelRequested(state: UserState, index: ChannelIndex): UserState {
+  return { ...state, [CHANNEL_FLAG_KEYS[index]]: true };
+}
+
+/** Все три заявки получены — обязательное задание считается выполненным. */
+export function allChannelsRequested(state: UserState | null): boolean {
+  if (!state) return false;
+  return isChannelRequested(state, 1) && isChannelRequested(state, 2) && isChannelRequested(state, 3);
 }
 
 // --- Подпись cookie ---------------------------------------------------------
@@ -106,6 +135,10 @@ function normalizeState(state: Partial<UserState>): UserState {
     totalEarned: Math.max(0, Math.trunc(state.totalEarned ?? 0)),
     completedTasks: Math.max(0, Math.trunc(state.completedTasks ?? 0)),
     isDemo: Boolean(state.isDemo),
+    // Старые cookie (без этих полей) читаются как «заявок ещё нет».
+    channel1Requested: state.channel1Requested === true,
+    channel2Requested: state.channel2Requested === true,
+    channel3Requested: state.channel3Requested === true,
     submissions: Array.isArray(state.submissions) ? state.submissions.slice(0, MAX_SUBMISSIONS) : [],
     transactions: Array.isArray(state.transactions) ? state.transactions.slice(0, MAX_TRANSACTIONS) : [],
   };
@@ -125,6 +158,9 @@ export function createTelegramState(telegramUser: TelegramUser): UserState {
     totalEarned: 0,
     completedTasks: 0,
     isDemo: false,
+    channel1Requested: false,
+    channel2Requested: false,
+    channel3Requested: false,
     submissions: [],
     transactions: [],
   };
@@ -142,6 +178,9 @@ export function createDemoState(): UserState {
     totalEarned: DEMO_BALANCE,
     completedTasks: 0,
     isDemo: true,
+    channel1Requested: false,
+    channel2Requested: false,
+    channel3Requested: false,
     submissions: [],
     transactions: [
       {

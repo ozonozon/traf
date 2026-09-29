@@ -18,14 +18,18 @@ export interface PublicUserDto {
   isDemo: boolean;
 }
 
-export type TaskState = "available" | "completed" | "expired" | "paused";
+export type TaskState = "available" | "completed" | "expired" | "paused" | "locked";
 
 /** Публичные данные Telegram-канала для задания «Подписка на Telegram-каналы». */
 export interface TaskChannelDto {
+  /** Номер канала 1..3 (совпадает с channel1Requested…channel3Requested в состоянии). */
+  index: 1 | 2 | 3;
   id: string;
   title: string;
-  username: string;
+  description: string;
   url: string;
+  /** true — Telegram прислал chat_join_request по этому каналу. Только серверное значение. */
+  requested: boolean;
 }
 
 export interface TaskListItemDto {
@@ -42,8 +46,6 @@ export interface TaskListItemDto {
   state: TaskState;
   /** Только для задач типа TELEGRAM_SUBSCRIPTION. */
   channels?: TaskChannelDto[];
-  /** true, если chat_id всех каналов заполнены (иначе проверка недоступна). */
-  channelsConfigured?: boolean;
 }
 
 export interface TaskOptionDto {

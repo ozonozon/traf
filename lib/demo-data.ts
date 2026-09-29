@@ -10,7 +10,7 @@
  * Это осознанный компромисс MVP: данные виртуальные и демонстрационные.
  */
 
-import { TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "./task-constants";
+import { TELEGRAM_SUBSCRIPTION_TASK_ID, TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "./task-constants";
 import { createSeededRandom, generateMockProfile, type RandomSource } from "./mock-users";
 
 // --- Задания ---------------------------------------------------------------
@@ -42,13 +42,12 @@ function optionsFor(taskId: string, texts: string[]): DemoTaskOption[] {
 /** Три тренировочных задания. Первое — подписка на Telegram-каналы (проверка на сервере). */
 export const DEMO_TASKS: DemoTask[] = [
   {
-    id: "task-telegram-subscription",
+    id: TELEGRAM_SUBSCRIPTION_TASK_ID,
     icon: "✈️",
     title: "Подписка на Telegram-каналы",
-    description:
-      "Подпишитесь на 3 Telegram-канала и отправьте заявки на вступление. После проверки подписок задание будет засчитано.",
+    description: "Отправьте заявки на вступление в 3 закрытых Telegram-канала.",
     conditions:
-      "Подпишитесь на 3 Telegram-канала и отправьте заявки на вступление. После проверки подписок задание будет засчитано.",
+      "Нажмите «Подписаться» в каждой карточке и отправьте заявку на вступление. Канал считается пройденным после того, как Telegram пришлёт заявку — нажатие кнопки статус не меняет.",
     virtualTarget: "Telegram-каналы",
     type: TELEGRAM_SUBSCRIPTION_TASK_TYPE,
     reward: 330,

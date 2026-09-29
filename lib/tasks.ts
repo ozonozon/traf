@@ -1,33 +1,50 @@
 import "server-only";
 
-import { hasUnconfiguredChannels, publicChannels } from "@/config/telegram-channels";
+import { publicChannels } from "@/config/telegram-channels";
 
 import type { DemoTask } from "./demo-data";
-import type { StoredSubmission } from "./store";
+import { allChannelsRequested, isChannelRequested, type ChannelIndex, type StoredSubmission, type UserState } from "./store";
 import { TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "./task-constants";
 import type { SubmissionDto, TaskChannelDto, TaskListItemDto, TaskState } from "./types";
 
 export { TELEGRAM_SUBSCRIPTION_TASK_TYPE };
 
 /**
- * Публичные данные каналов для задач «Подписка на Telegram-каналы».
- * Bot token, chat_id и прочие служебные поля на фронтенд не уходят.
+ * Данные каналов для задачи «Подписка на Telegram-каналы».
+ * `requested` берётся ТОЛЬКО из подписанного состояния (cookie): true появляется
+ * исключительно после того, как Telegram прислал chat_join_request и подписанный
+ * тикет заявки был применён. Ни нажатие кнопки, ни открытие ссылки не влияют.
  */
-export function subscriptionTaskFields(type: string): {
+export function subscriptionTaskFields(
+  type: string,
+  state: UserState | null,
+): {
   channels?: TaskChannelDto[];
-  channelsConfigured?: boolean;
 } {
   if (type !== TELEGRAM_SUBSCRIPTION_TASK_TYPE) return {};
-  return { channels: publicChannels(), channelsConfigured: !hasUnconfiguredChannels() };
+
+  return {
+    channels: publicChannels().map((channel) => ({
+      ...channel,
+      requested: state ? isChannelRequested(state, channel.index as ChannelIndex) : false,
+    })),
+  };
+}
+
+/** Обязательное задание выполнено (все три заявки получены)? */
+export function isSubscriptionComplete(state: UserState | null): boolean {
+  return allChannelsRequested(state);
 }
 
 /** Состояние задания для конкретного пользователя. */
 export function computeTaskState(
-  task: Pick<DemoTask, "status">,
+  task: Pick<DemoTask, "status" | "type">,
   deadline: Date,
   isCompletedByUser: boolean,
+  isLocked: boolean,
 ): TaskState {
   if (isCompletedByUser) return "completed";
+  if (isLocked) return "locked";
   if (task.status === "PAUSED") return "paused";
   if (task.status !== "ACTIVE") return "expired";
   if (deadline.getTime() < Date.now()) return "expired";

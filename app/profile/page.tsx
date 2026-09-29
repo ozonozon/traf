@@ -89,19 +89,15 @@ export default function ProfilePage() {
               <ThemeSwitcherRow />
             </section>
 
-            <section className="mt-8">
-              <h2 className="text-[22px] tracking-[-0.02em]">История операций</h2>
-              <p className="mt-1.5 text-[13px] text-muted">Все начисления — виртуальные</p>
-              <div className="mt-3.5">
-                {isFromServer ? (
+            {isFromServer ? (
+              <section className="mt-8">
+                <h2 className="text-[22px] tracking-[-0.02em]">История операций</h2>
+                <p className="mt-1.5 text-[13px] text-muted">Все начисления — виртуальные</p>
+                <div className="mt-3.5">
                   <TransactionList />
-                ) : (
-                  <p className="rounded-[18px] border border-border bg-surface px-3.5 py-3 text-[12.5px] leading-snug text-muted">
-                    История операций и место в рейтинге подгружаются, когда приложение открыто внутри Telegram.
-                  </p>
-                )}
-              </div>
-            </section>
+                </div>
+              </section>
+            ) : null}
           </>
         ) : (
           <div className="mt-5">

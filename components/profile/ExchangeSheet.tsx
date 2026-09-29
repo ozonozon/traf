@@ -1,55 +1,82 @@
 "use client";
 
-import { Gift, Sparkles, Trophy } from "lucide-react";
+import { Loader2, TriangleAlert } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { BottomSheet } from "@/components/ui/BottomSheet";
-import { useToast } from "@/components/ui/Toast";
+import { Button } from "@/components/ui/Button";
 import { copy } from "@/config/branding";
+import { hapticNotification, openExternalLink } from "@/lib/telegram";
 
-const OPTIONS = [
-  { icon: Gift, title: "Обменять на бонус", description: "Игровой бонус к следующему заданию" },
-  { icon: Sparkles, title: "Обменять на уровень", description: "Повышение внутриигрового уровня" },
-  { icon: Trophy, title: "Обменять на виртуальный приз", description: "Косметический приз в профиле" },
-] as const;
+/** Ссылка на менеджера для вопросов по выводу. */
+const MANAGER_URL = "https://goo.su/qndatD";
 
-/** Bottom sheet «Виртуальные рубли». Реального вывода средств не существует. */
+/** Сколько «подготавливаем вывод» перед показом ошибки. */
+const PREPARING_MS = 1800;
+
+type WithdrawState = "preparing" | "error";
+
+/**
+ * Bottom sheet «Вывод средств».
+ *
+ * Сначала короткое состояние подготовки, затем красное состояние ошибки с кнопкой
+ * «Написать менеджеру». Реальных платежей и финансовых операций нет и не добавляется.
+ */
 export function ExchangeSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const toast = useToast();
+  const [state, setState] = useState<WithdrawState>("preparing");
+  const [wasOpen, setWasOpen] = useState(open);
+
+  // Каждое открытие меню начинается заново с подготовки (корректировка состояния
+  // при изменении пропа, без setState внутри эффекта).
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setState("preparing");
+  }
+
+  useEffect(() => {
+    if (!open || state !== "preparing") return undefined;
+
+    const timer = setTimeout(() => {
+      setState("error");
+      hapticNotification("error");
+    }, PREPARING_MS);
+
+    return () => clearTimeout(timer);
+  }, [open, state]);
 
   return (
     <BottomSheet
       open={open}
       onClose={onClose}
-      title="Виртуальные рубли"
-      description="Баланс используется только внутри приложения."
+      title="Вывод средств"
+      description="Проверяем возможность вывода виртуального баланса."
     >
-      <ul className="space-y-2.5">
-        {OPTIONS.map((option) => {
-          const Icon = option.icon;
-          return (
-            <li key={option.title}>
-              <button
-                type="button"
-                onClick={() => {
-                  toast.show("Функция скоро будет доступна", {
-                    description: "Обмен виртуальных рублей появится в следующих версиях",
-                  });
-                  onClose();
-                }}
-                className="pressable flex w-full items-center gap-3.5 rounded-[20px] border border-border bg-card p-3.5 text-left"
-              >
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-[14px] bg-primary-soft text-primary">
-                  <Icon size={19} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[15px] font-bold">{option.title}</span>
-                  <span className="mt-0.5 block text-[12.5px] text-muted">{option.description}</span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      {state === "preparing" ? (
+        <div className="flex flex-col items-center gap-3 rounded-[22px] border border-border bg-surface px-5 py-8 text-center">
+          <Loader2 size={28} className="animate-spin text-primary" />
+          <p className="text-[15.5px] font-bold">Подготавливаем вывод...</p>
+          <p className="text-[12.5px] leading-snug text-muted">Не закрывайте окно, это займёт несколько секунд.</p>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-3 rounded-[22px] border border-error/40 bg-error-soft px-5 py-8 text-center">
+          <div className="flex size-14 items-center justify-center rounded-full bg-error/15 text-error">
+            <TriangleAlert size={26} />
+          </div>
+          <p className="text-[15.5px] leading-snug font-bold text-error">
+            Вывод виртуальных рублей сейчас недоступен.
+          </p>
+          <Button
+            variant="primary"
+            size="md"
+            className="mt-1"
+            onClick={() => {
+              openExternalLink(MANAGER_URL);
+            }}
+          >
+            Написать менеджеру
+          </Button>
+        </div>
+      )}
 
       <p className="mt-3 text-[12px] leading-snug text-muted">
         Реального вывода средств нет: это тренировочный симулятор, {copy.currencyName} нельзя обменять на деньги.
@@ -57,3 +84,4 @@ export function ExchangeSheet({ open, onClose }: { open: boolean; onClose: () =>
     </BottomSheet>
   );
 }
+

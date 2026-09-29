@@ -5,8 +5,7 @@ import { toPublicUser } from "@/lib/auth";
 import { findDemoTask, resolveDeadline } from "@/lib/demo-data";
 import { RouteError, handleRouteError, jsonOk, requireUser } from "@/lib/http";
 import { applySubmission, findSubmission, saveUserState } from "@/lib/store";
-import { TELEGRAM_SUBSCRIPTION_TASK_TYPE, serializeSubmission } from "@/lib/tasks";
-import { checkChannelsMembership, hasUnconfiguredChannels, isNumericTelegramId } from "@/lib/telegram-channels";
+import { TELEGRAM_SUBSCRIPTION_TASK_TYPE, isSubscriptionComplete, serializeSubmission } from "@/lib/tasks";
 import { formatZodIssues, submissionSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -18,8 +17,10 @@ export const dynamic = "force-dynamic";
  * Выполнение задания.
  *  - пользователь определяется только из подписанной cookie-сессии;
  *  - reward берётся только из определения задания (lib/demo-data.ts);
- *  - для заданий TELEGRAM_SUBSCRIPTION backend сам проверяет подписки через
- *    Telegram Bot API (getChatMember) — клиент не может «заявить» о подписке;
+ *  - для задания TELEGRAM_SUBSCRIPTION подписки через getChatMember не проверяются:
+ *    учитывается факт chat_join_request от Telegram (channel1Requested…channel3Requested
+ *    в подписанном состоянии). Пока все три заявки не получены, задание не завершить,
+ *    а остальные задания заблокированы;
  *  - submission, операция и баланс обновляются одним действием: состояние
  *    пересчитывается на сервере и заново подписывается (см. lib/store.ts).
  */
@@ -41,50 +42,31 @@ export async function POST(request: NextRequest) {
       throw new RouteError("TASK_NOT_FOUND", "Задание не найдено", 404);
     }
 
-    // --- Проверка Telegram-подписок (только backend) ---
-    if (task.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE) {
-      if (hasUnconfiguredChannels()) {
-        throw new RouteError("CHANNELS_NOT_CONFIGURED", "Каналы ещё не настроены.", 503);
-      }
-      if (!isNumericTelegramId(user.telegramId)) {
-        throw new RouteError(
-          "CHANNELS_CHECK_UNAVAILABLE",
-          "Проверка подписок доступна только внутри Telegram.",
-          409,
-        );
-      }
+    const isSubscriptionTask = task.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE;
+    const subscriptionDone = isSubscriptionComplete(user);
 
-      const results = await checkChannelsMembership(user.telegramId, TELEGRAM_CHANNELS);
-      const details = {
-        channels: results.map((result) => ({
-          id: result.channelId,
-          status: result.status,
-          message: result.message,
-        })),
-      };
+    // Обязательное задание: пока Telegram не прислал заявки по всем трём каналам,
+    // задание нельзя завершить (нажатие «Подписаться» заявку не создаёт).
+    if (isSubscriptionTask && !subscriptionDone) {
+      throw new RouteError(
+        "JOIN_REQUESTS_INCOMPLETE",
+        "Ожидаем подтверждение заявок от Telegram по всем каналам",
+        409,
+      );
+    }
 
-      if (results.some((result) => result.status === "error")) {
-        throw new RouteError(
-          "CHANNELS_CHECK_FAILED",
-          "Не удалось проверить подписки. Попробуйте позже.",
-          502,
-          undefined,
-          details,
-        );
-      }
+    // Следующие задания закрыты, пока обязательное задание не выполнено.
+    if (!isSubscriptionTask && !subscriptionDone) {
+      throw new RouteError(
+        "TASKS_LOCKED",
+        "Сначала выполните обязательное задание «Подписка на Telegram-каналы»",
+        403,
+      );
+    }
 
-      const notJoined = results.filter((result) => result.status !== "joined");
-      if (notJoined.length > 0) {
-        throw new RouteError(
-          "CHANNELS_NOT_SUBSCRIBED",
-          `Подпишитесь на все ${TELEGRAM_CHANNELS.length} канала`,
-          409,
-          undefined,
-          details,
-        );
-      }
-
-      answer = `Подписка подтверждена: ${TELEGRAM_CHANNELS.map((channel) => channel.title).join(", ")}`;
+    if (isSubscriptionTask) {
+      // Отметка о заявках, подтверждённых Telegram (состояние уже проверено выше).
+      answer = `Заявки подтверждены Telegram: ${TELEGRAM_CHANNELS.map((channel) => channel.title).join(", ")}`;
     }
 
     if (task.status !== "ACTIVE") {
@@ -93,8 +75,6 @@ export async function POST(request: NextRequest) {
     if (resolveDeadline().getTime() < Date.now()) {
       throw new RouteError("TASK_EXPIRED", "Срок выполнения задания истёк", 409);
     }
-
-    const isSubscriptionTask = task.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE;
 
     if (!isSubscriptionTask) {
       if (answer.length < task.minLength) {

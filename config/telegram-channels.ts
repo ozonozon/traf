@@ -1,67 +1,101 @@
 /**
- * Конфигурация Telegram-каналов для задания «Подписка на Telegram-каналы».
+ * Каналы задания «Подписка на Telegram-каналы».
  *
- * ЭТО ЕДИНСТВЕННОЕ МЕСТО, где нужно менять каналы.
+ * ЭТО ЕДИНСТВЕННОЕ МЕСТО, где меняются ссылки и сопоставление заявок.
  *
- *  - `url`    — ссылка, которую открывает пользователь (обычная или инвайт-ссылка t.me/+hash);
- *  - `chatId` — идентификатор канала для Bot API `getChatMember`: публичный @username
- *               или числовой id вида -1001234567890.
- *
- * ⚠️ Пока `chatId = null` (не настроено), backend НЕ обращается к Telegram API и возвращает
- * понятное состояние «Каналы ещё не настроены.», задание не засчитывается.
- * После подстановки реальных `url` и `chatId` проверка заработает без изменений frontend.
+ * Заявки (`chat_join_request`) Telegram присылает нашему webhook. Заявка определяется
+ * по `invite_link.invite_link` (та самая постоянная ссылка, которую использовал
+ * пользователь) — отдельные ссылки для пользователей не создаются. Если у канала
+ * дополнительно известен `chatId`, он используется как второй признак.
  */
 
+/** Номер канала: совпадает с полями channel1Requested…channel3Requested в состоянии. */
+export type TelegramChannelIndex = 1 | 2 | 3;
+
 export interface TelegramChannelConfig {
+  index: TelegramChannelIndex;
   id: string;
+  /** Название канала для карточки задания. */
   title: string;
-  username: string;
+  /** Короткое описание для карточки задания. */
+  description: string;
+  /** Постоянная invite-ссылка канала — её открывает кнопка «Подписаться». */
   url: string;
-  /** @username канала или числовой chat id. null — канал ещё не настроен. */
+  /** Необязательный id канала (например, -1001234567890) как второй признак заявки. */
   chatId: string | null;
 }
 
-/** Публичное представление канала для API (без служебных полей). */
+/** Данные канала для фронтенда: только то, что нужно интерфейсу. */
 export interface TelegramChannelPublic {
+  index: TelegramChannelIndex;
   id: string;
   title: string;
-  username: string;
+  description: string;
   url: string;
 }
 
 export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
   {
+    index: 1,
     id: "channel_1",
-    title: "Канал 1",
-    username: "@channel_1",
-    url: "https://t.me/channel_1",
+    title: "Канал с заданиями",
+    description: "Новые задания и выплаты каждый день",
+    url: "https://t.me/+MWJ1dz5nuf4zMjcx",
     chatId: null,
   },
   {
+    index: 2,
     id: "channel_2",
-    title: "Канал 2",
-    username: "@channel_2",
-    url: "https://t.me/channel_2",
+    title: "Канал с выплатами",
+    description: "Новости платформы и розыгрыши",
+    url: "https://t.me/+nJs69Y_Xpm5hMDU5",
     chatId: null,
   },
   {
+    index: 3,
     id: "channel_3",
-    title: "Канал 3",
-    username: "@channel_3",
-    url: "https://t.me/channel_3",
+    title: "Канал поддержки",
+    description: "Ответы на вопросы и помощь",
+    url: "https://t.me/+0o4yDY6AODI3OTQx",
     chatId: null,
   },
 ];
 
-/** Каналы без служебных полей — уходят на фронтенд. */
+/** Каналы для фронтенда. */
 export function publicChannels(channels: TelegramChannelConfig[] = TELEGRAM_CHANNELS): TelegramChannelPublic[] {
-  return channels.map(({ id, title, username, url }) => ({ id, title, username, url }));
+  return channels.map(({ index, id, title, description, url }) => ({ index, id, title, description, url }));
 }
 
-/** true, если хотя бы у одного канала не заполнен chatId. */
-export function hasUnconfiguredChannels(channels: TelegramChannelConfig[] = TELEGRAM_CHANNELS): boolean {
-  return channels.some((channel) => !channel.chatId);
+/** Приводит ссылку к сравнимому виду: без схемы, домена, ведущего «+» и слэшей. */
+function normalizeInvite(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^t\.me\//, "")
+    .replace(/^\+/, "")
+    .replace(/\/+$/, "");
 }
 
-/** Количество каналов, на которые нужно подписаться. */
-export const TELEGRAM_CHANNELS_COUNT = TELEGRAM_CHANNELS.length;
+/**
+ * Определяет канал по данным заявки из Telegram.
+ * Сначала — по invite-ссылке (её присылает сам Telegram), затем — по chatId, если он задан.
+ */
+export function findChannelByInvite(
+  inviteLink?: string | null,
+  chatId?: number | string | null,
+): TelegramChannelConfig | null {
+  if (inviteLink) {
+    const normalized = normalizeInvite(inviteLink);
+    const byLink = TELEGRAM_CHANNELS.find((channel) => normalizeInvite(channel.url) === normalized);
+    if (byLink) return byLink;
+  }
+
+  if (chatId !== undefined && chatId !== null) {
+    const idText = String(chatId);
+    return TELEGRAM_CHANNELS.find((channel) => channel.chatId !== null && String(channel.chatId) === idText) ?? null;
+  }
+
+  return null;
+}
+

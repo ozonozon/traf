@@ -48,6 +48,29 @@ function localUserFromTelegram(): PublicUserDto | null {
   return telegramUser ? toLocalUser(telegramUser) : null;
 }
 
+/**
+ * Применяет тикет заявки на вступление, если приложение открыто по кнопке подтверждения
+ * из бота (`?join=<подписанный тикет>`). Сервер проверяет подпись тикета и обновляет
+ * подписанное состояние; параметр из адреса убираем, чтобы он не «залипал».
+ */
+async function applyJoinTicketFromUrl(): Promise<void> {
+  if (typeof window === "undefined") return;
+
+  const params = new URLSearchParams(window.location.search);
+  const ticket = params.get("join");
+  if (!ticket) return;
+
+  try {
+    await apiFetch("/api/telegram/join-request", { json: { ticket } });
+  } catch {
+    // Тикет не применился — состояние просто останется прежним, работе это не мешает.
+  } finally {
+    params.delete("join");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  }
+}
+
 export function TelegramProvider({ children }: { children: ReactNode }) {
   const [nonce, setNonce] = useState(0);
   const [state, setState] = useState<SessionState | null>(null);
@@ -61,14 +84,22 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
 
     initTelegram();
 
-    apiFetch<AuthResponseDto>("/api/auth/telegram", { json: { initData: getInitData() } })
-      .then((data) => {
-        if (!cancelled) setState({ key: nonce, user: data.user, error: null });
-      })
-      .catch((cause: unknown) => {
+    (async () => {
+      try {
+        const data = await apiFetch<AuthResponseDto>("/api/auth/telegram", { json: { initData: getInitData() } });
+        if (cancelled) return;
+
+        // Тикет заявки применяем сразу после входа: сервер проверит подпись и обновит cookie,
+        // поэтому все последующие запросы страниц увидят актуальные статусы заявок.
+        await applyJoinTicketFromUrl();
+        if (cancelled) return;
+
+        setState({ key: nonce, user: data.user, error: null });
+      } catch (cause) {
         if (cancelled) return;
         setState({ key: nonce, user: localUserFromTelegram(), error: toApiError(cause) });
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;

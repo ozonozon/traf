@@ -17,7 +17,7 @@ export function BalanceCard({ balance, totalEarned }: { balance: number; totalEa
         className="mt-4 rounded-[28px] p-5 text-white"
         style={{ background: "var(--primary-gradient)", boxShadow: "var(--app-shadow-float)" }}
       >
-        <p className="text-[11.5px] font-bold tracking-[0.16em] text-white/75 uppercase">Доступно</p>
+        <p className="text-[11.5px] font-bold tracking-[0.16em] text-white/75 uppercase">Доступно к выводу</p>
         <p className="mt-2.5 text-[40px] leading-none font-extrabold tracking-[-0.03em]">{formatRub(balance)}</p>
 
         <div className="mt-4 flex items-center justify-between gap-3 rounded-[18px] bg-white/15 px-4 py-3">
@@ -32,7 +32,7 @@ export function BalanceCard({ balance, totalEarned }: { balance: number; totalEa
           onClick={() => setIsSheetOpen(true)}
           className="pressable mt-3 h-[54px] w-full rounded-[24px] bg-accent-surface text-[16px] font-bold text-accent-surface-text"
         >
-          Использовать виртуальные рубли
+          Вывести деньги
         </button>
       </section>
 

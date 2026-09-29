@@ -1,12 +1,11 @@
 "use client";
 
-import { Send } from "lucide-react";
+import { Check, Clock, Send } from "lucide-react";
 import { useState } from "react";
 
 import { useSession } from "@/components/telegram/TelegramProvider";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { VirtualNote } from "@/components/ui/VirtualNote";
 import { apiFetch, isApiError } from "@/lib/api";
 import { hapticNotification, hapticSelection, openExternalLink } from "@/lib/telegram";
 import type { SubmissionResponseDto, TaskChannelDto, TaskDetailDto } from "@/lib/types";
@@ -15,68 +14,39 @@ import { cn, formatRub } from "@/lib/utils";
 import { TaskSuccess } from "./TaskSuccess";
 
 /**
- * Состояния канала в UI.
- * «Подписка подтверждена» появляется ТОЛЬКО из ответа backend —
- * клиент не может сам решить, что задание выполнено.
+ * Задание «Подписка на Telegram-каналы».
+ *
+ * Три карточки с кнопкой «Подписаться» — каждая открывает свою постоянную invite-ссылку.
+ * Статусы «Ожидаем запрос» / «Запрос отправлен» берутся ТОЛЬКО из серверного состояния:
+ * true появляется после того, как Telegram прислал chat_join_request, а подписанный
+ * тикет заявки был применён. Нажатие кнопки и открытие ссылки статус не меняют.
+ * Подписки через getChatMember не проверяются.
  */
-type ChannelStatus = "not_checked" | "request_sent" | "checking" | "joined" | "not_joined";
-
-const STATUS_META: Record<ChannelStatus, { text: string; className: string }> = {
-  not_checked: { text: "○ Не проверено", className: "text-muted" },
-  request_sent: { text: "✓ Заявка отправлена", className: "text-primary" },
-  checking: { text: "Проверяем...", className: "text-muted" },
-  joined: { text: "✓ Подписка подтверждена", className: "text-success" },
-  not_joined: { text: "✗ Подписка не найдена", className: "text-error" },
-};
-
-interface ChannelStatusPayload {
-  channels?: Array<{ id: string; status: string }>;
-}
-
-function statusFromBackend(status: string): ChannelStatus {
-  return status === "joined" ? "joined" : "not_joined";
-}
-
-/** Задание «Подписка на Telegram-каналы»: карточки каналов + серверная проверка подписок. */
 export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   const toast = useToast();
   const { setUser } = useSession();
 
   const channels = task.channels ?? [];
-  const isConfigured = task.channelsConfigured ?? false;
+  const requestedCount = channels.filter((channel) => channel.requested).length;
+  const allRequested = channels.length > 0 && requestedCount === channels.length;
 
-  const [statuses, setStatuses] = useState<Record<string, ChannelStatus>>(() =>
-    Object.fromEntries(channels.map((channel) => [channel.id, "not_checked" as ChannelStatus])),
-  );
-  const [isChecking, setIsChecking] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [reward, setReward] = useState<number | null>(
     task.state === "completed" ? (task.submission?.reward ?? task.reward) : null,
   );
   const [isFresh, setIsFresh] = useState(false);
 
-  const allRequested = channels.every((channel) => {
-    const status = statuses[channel.id];
-    return status === "request_sent" || status === "joined";
-  });
-
   function handleSubscribe(channel: TaskChannelDto) {
     hapticSelection();
+    // Ссылку открывает нативный метод Telegram: внутри Mini App переход остаётся в Telegram.
+    // Статус канала от нажатия НЕ меняется: он появляется только после chat_join_request.
     openExternalLink(channel.url);
-    setStatuses((current) => ({ ...current, [channel.id]: "request_sent" }));
   }
 
-  function resetStatuses() {
-    setStatuses(Object.fromEntries(channels.map((channel) => [channel.id, "not_checked" as ChannelStatus])));
-  }
+  async function handleSubmit() {
+    if (isSubmitting || !allRequested) return;
 
-  async function handleCheck() {
-    if (isChecking) return;
-
-    setIsChecking(true);
-    setMessage(null);
-    setStatuses(Object.fromEntries(channels.map((channel) => [channel.id, "checking" as ChannelStatus])));
-
+    setIsSubmitting(true);
     try {
       const response = await apiFetch<SubmissionResponseDto>("/api/submissions", {
         json: { taskId: task.id },
@@ -90,30 +60,18 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
         variant: "success",
       });
     } catch (cause) {
-      const details = isApiError(cause) ? (cause.details as ChannelStatusPayload | undefined) : undefined;
-      if (details?.channels?.length) {
-        setStatuses((current) => {
-          const next = { ...current };
-          for (const channel of details.channels ?? []) {
-            next[channel.id] = statusFromBackend(channel.status);
-          }
-          return next;
-        });
-      } else {
-        resetStatuses();
-      }
-
-      const text = isApiError(cause) ? cause.message : "Не удалось проверить подписки";
-      setMessage(text);
+      const code = isApiError(cause) ? cause.code : "REQUEST_FAILED";
       hapticNotification("error");
-      toast.show("Проверка не пройдена", { description: text, variant: "error" });
-
-      if (isApiError(cause) && cause.code === "TASK_ALREADY_COMPLETED") {
+      toast.show("Не удалось выполнить задание", {
+        description: isApiError(cause) ? cause.message : "Попробуйте позже",
+        variant: "error",
+      });
+      if (code === "TASK_ALREADY_COMPLETED") {
         setReward(task.reward);
         setIsFresh(false);
       }
     } finally {
-      setIsChecking(false);
+      setIsSubmitting(false);
     }
   }
 
@@ -123,14 +81,13 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
 
   return (
     <div className="space-y-3.5">
-      <VirtualNote>
-        Подпишитесь на все {channels.length} канала и нажмите «Проверить подписки». Подписку проверяет сервер через
-        Telegram Bot API — «Подписка подтверждена» появляется только после реальной проверки.
-      </VirtualNote>
+      <p className="px-1 text-[13px] leading-snug text-muted">
+        Отправьте заявку на вступление в {channels.length} канала. Статус появится после того, как Telegram пришлёт
+        заявку — нажатие кнопки его не меняет.
+      </p>
 
       {channels.map((channel) => {
-        const status = statuses[channel.id] ?? "not_checked";
-        const meta = STATUS_META[status];
+        const isRequested = channel.requested;
 
         return (
           <section key={channel.id} className="card-surface p-4">
@@ -140,39 +97,44 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[15.5px] leading-tight font-bold">{channel.title}</p>
-                <p className="mt-1 truncate text-[12.5px] leading-none text-muted">{channel.username}</p>
+                <p className="mt-1 truncate text-[12.5px] leading-none text-muted">{channel.description}</p>
               </div>
             </div>
 
-            <p className={cn("mt-3 text-[12.5px] font-semibold", meta.className)}>{meta.text}</p>
+            <p
+              className={cn(
+                "mt-3 flex items-center gap-1.5 text-[12.5px] font-semibold",
+                isRequested ? "text-success" : "text-muted",
+              )}
+            >
+              {isRequested ? <Check size={14} /> : <Clock size={13} />}
+              {isRequested ? "Запрос отправлен" : "Ожидаем запрос"}
+            </p>
 
-            <Button variant="secondary" size="md" className="mt-3" onClick={() => handleSubscribe(channel)}>
+            <Button
+              variant={isRequested ? "secondary" : "primary"}
+              size="md"
+              className="mt-3"
+              onClick={() => handleSubscribe(channel)}
+            >
               Подписаться
             </Button>
           </section>
         );
       })}
 
-      {!isConfigured ? (
-        <VirtualNote>
-          Каналы ещё не настроены. Проверка подписок станет доступна после подключения каналов.
-        </VirtualNote>
-      ) : null}
-
-      {message ? (
-        <p className="px-1 text-center text-[13px] leading-snug font-semibold text-error">{message}</p>
-      ) : null}
-
       <div className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[900px] border-t border-border bg-card/95 px-5 pt-3 pb-[calc(14px+env(safe-area-inset-bottom,0px))] backdrop-blur-md">
         <Button
           variant={allRequested ? "primary" : "secondary"}
-          onClick={handleCheck}
-          isLoading={isChecking}
-          disabled={isChecking}
+          onClick={handleSubmit}
+          isLoading={isSubmitting}
+          disabled={!allRequested || isSubmitting}
         >
-          {isChecking ? "Проверяем..." : "Проверить подписки"}
+          {allRequested ? "Получить вознаграждение" : `Ожидаем заявки (${requestedCount}/${channels.length})`}
         </Button>
       </div>
     </div>
   );
 }
+
+

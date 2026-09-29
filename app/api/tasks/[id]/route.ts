@@ -4,7 +4,14 @@ import { getCurrentUser } from "@/lib/auth";
 import { findDemoTask, resolveDeadline } from "@/lib/demo-data";
 import { RouteError, handleRouteError, jsonOk } from "@/lib/http";
 import { findSubmission } from "@/lib/store";
-import { computeTaskState, serializeSubmission, serializeTaskSummary, subscriptionTaskFields } from "@/lib/tasks";
+import {
+  TELEGRAM_SUBSCRIPTION_TASK_TYPE,
+  computeTaskState,
+  isSubscriptionComplete,
+  serializeSubmission,
+  serializeTaskSummary,
+  subscriptionTaskFields,
+} from "@/lib/tasks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,12 +32,13 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
 
     const deadline = resolveDeadline();
     const submission = user ? findSubmission(user, task.id) : null;
-    const state = computeTaskState(task, deadline, Boolean(submission));
+    const isLocked = task.type !== TELEGRAM_SUBSCRIPTION_TASK_TYPE && !isSubscriptionComplete(user);
+    const state = computeTaskState(task, deadline, Boolean(submission), isLocked);
 
     return jsonOk({
       task: {
         ...serializeTaskSummary(task, deadline, state),
-        ...subscriptionTaskFields(task.type),
+        ...subscriptionTaskFields(task.type, user),
         conditions: task.conditions,
         options: task.options.map((option) => ({ id: option.id, text: option.text })),
         submission: submission ? serializeSubmission(submission) : null,
