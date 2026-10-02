@@ -28,11 +28,13 @@ export function TransactionList() {
   const [error, setError] = useState<ApiError | null>(null);
   const [nonce, setNonce] = useState(0);
 
-  const { isReady, version, authedFetch } = session;
+  const { status, version, authedFetch } = session;
+  const isSessionLoading = status === "loading";
 
   useEffect(() => {
-    // Пока сессии нет — данные не запрашиваем, показываем скелетон.
-    if (!isReady) return undefined;
+    // Пока идёт вход — не запрашиваем. После его завершения (в том числе с ошибкой)
+    // запрос уходит: экран покажет реальный ответ сервера, а не синтетическую ошибку.
+    if (isSessionLoading) return undefined;
 
     let cancelled = false;
 
@@ -59,7 +61,7 @@ export function TransactionList() {
     return () => {
       cancelled = true;
     };
-  }, [isReady, version, authedFetch, nonce]);
+  }, [isSessionLoading, version, authedFetch, nonce]);
 
   async function loadMore() {
     setIsLoadingMore(true);
@@ -78,17 +80,13 @@ export function TransactionList() {
   }
 
   function retry() {
-    if (!isReady) session.retry();
+    if (session.status === "error") session.retry();
     setIsLoading(true);
     setError(null);
     setNonce((value) => value + 1);
   }
 
-  // Вход не удался — показываем ошибку с кнопкой повтора (она повторит авторизацию).
-  if (!isReady) {
-    if (session.status === "error") return <ErrorState onRetry={retry} />;
-    return <TransactionsSkeleton count={4} />;
-  }
+  if (isSessionLoading) return <TransactionsSkeleton count={4} />;
   if (isLoading) return <TransactionsSkeleton count={4} />;
   if (error) return <ErrorState onRetry={retry} />;
   if (transactions.length === 0) {

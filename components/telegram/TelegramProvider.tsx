@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -87,6 +88,7 @@ function localUserFromTelegram(): PublicUserDto | null {
 export function TelegramProvider({ children }: { children: ReactNode }) {
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<SessionState | null>(null);
+  const reauthRef = useRef<Promise<PublicUserDto | null> | null>(null);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -110,13 +112,22 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const reauthenticate = useCallback(async (): Promise<PublicUserDto | null> => {
-    try {
-      const user = await signIn();
-      applyUser(user);
-      return user;
-    } catch {
-      return null;
+    // Одновременные 401 от нескольких экранов делят один повторный вход.
+    if (!reauthRef.current) {
+      reauthRef.current = (async () => {
+        try {
+          const user = await signIn();
+          applyUser(user);
+          return user;
+        } catch {
+          return null;
+        } finally {
+          reauthRef.current = null;
+        }
+      })();
     }
+
+    return reauthRef.current;
   }, [signIn, applyUser]);
 
   // Основной эффект авторизации: монтирование и повтор по retry().

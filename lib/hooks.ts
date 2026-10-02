@@ -30,14 +30,6 @@ function toApiError(cause: unknown): ApiError {
   return Object.assign(new Error("Request failed"), { code: "REQUEST_FAILED", status: 0 }) as ApiError;
 }
 
-/** Ошибка для случая «сессия не установлена»: экран покажет её и кнопку повтора. */
-function unauthorizedError(): ApiError {
-  return Object.assign(new Error("Нужно открыть приложение внутри Telegram"), {
-    code: "UNAUTHORIZED",
-    status: 401,
-  }) as ApiError;
-}
-
 /**
  * Простейший data-fetching хук для клиентских экранов (без внешних зависимостей).
  * isLoading выводится из состояния, чтобы не вызывать setState синхронно в эффекте.
@@ -80,21 +72,20 @@ export function useApi<T>(url: string | null, options?: UseApiOptions): UseApiRe
 }
 
 /**
- * Хук для запросов, которым нужна сессия Telegram Mini App.
+ * Хук для запросов экранов приложения.
  *
- * Гарантирует порядок: пока авторизация не завершилась (session.isReady === false),
- * запрос вообще не отправляется — тем самым `/api/channel-requests`, `/api/stats`,
- * `/api/leaderboard`, `/api/profile`, `/api/transactions` не могут уйти раньше,
- * чем сервер поставил session cookie. При смене версии сессии данные перезапрашиваются,
- * а 401 один раз автоматически лечится повторным входом (session.authedFetch).
- *
- * Если же вход не удался (нет initData, нет TELEGRAM_BOT_TOKEN, база недоступна),
- * экран получает ошибку с кнопкой повтора, которая запускает повторную авторизацию.
+ * Порядок важен: пока идёт вход (session.status === "loading"), запрос не отправляется —
+ * поэтому `/api/channel-requests`, `/api/profile`, `/api/transactions` не могут уйти раньше,
+ * чем сервер поставит session cookie. Как только вход завершился (успешно ИЛИ ошибкой),
+ * запрос уходит: публичные роуты (`/api/stats`, `/api/leaderboard`, `/api/tasks`) отдают
+ * данные и без сессии, а защищённые возвращают честный 401/500 — экран покажет ответ сервера
+ * и кнопку повтора. Так ошибка входа не маскируется и не блокирует доступные данные.
  */
 export function useAuthedApi<T>(path: string | null): UseApiResult<T> {
   const session = useSession();
+  const isSessionLoading = session.status === "loading";
 
-  const result = useApi<T>(session.isReady ? path : null, {
+  const result = useApi<T>(isSessionLoading ? null : path, {
     version: session.version,
     fetcher: session.authedFetch,
   });
@@ -105,16 +96,6 @@ export function useAuthedApi<T>(path: string | null): UseApiResult<T> {
     result.refresh();
   }, [session, result]);
 
-  if (!session.isReady) {
-    const failed = session.status === "error";
-    return {
-      data: null,
-      error: failed ? (session.error ?? unauthorizedError()) : null,
-      isLoading: !failed,
-      refresh,
-    };
-  }
-
-  return { ...result, refresh };
+  return { ...result, refresh, isLoading: isSessionLoading || result.isLoading };
 }
 

@@ -90,11 +90,15 @@ npm run dev
    (`INSERT … ON CONFLICT (telegram_id) DO UPDATE`) и ставит подписанную cookie.
 4. Клиент получает 200 → `session.status = "ready"`, растёт `session.version`.
 5. **Лишь теперь** экраны запрашивают данные: `useAuthedApi()` (`lib/hooks.ts`) отдаёт
-   `null`-URL до готовности сессии, поэтому `/api/channel-requests`, `/api/stats`,
-   `/api/leaderboard`, `/api/profile`, `/api/transactions` физически не уходят раньше входа.
+   `null`-URL, пока идёт вход, поэтому запросы не уходят раньше, чем сервер поставил
+   session cookie. Если вход завершился ошибкой, запрос всё равно выполняется один раз:
+   `/api/tasks`, `/api/stats`, `/api/leaderboard` отдают данные без сессии, а
+   `/api/channel-requests`, `/api/profile`, `/api/transactions` возвращают честный
+   401/500 — экран показывает ответ сервера и кнопку повтора (ошибка не маскируется).
 6. Все запросы идут через один механизм: `apiFetch` (`lib/api.ts`, `credentials: "include"`,
    `cache: "no-store"`) и `session.authedFetch`, который при 401 один раз повторяет вход
-   и повторяет запрос. При смене `session.version` данные перезапрашиваются автоматически.
+   (одновременные 401 делят одну попытку) и повторяет запрос. При смене `session.version`
+   данные перезапрашиваются автоматически.
 
 Если Mini App вернулся из фона без сессии (например, пользователь отправлял заявку в канале),
 вход повторяется автоматически по `visibilitychange`, а на экранах есть кнопка «Повторить».
