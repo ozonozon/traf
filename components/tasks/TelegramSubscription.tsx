@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useSession } from "@/components/telegram/TelegramProvider";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { isApiError } from "@/lib/api";
+import { apiFetch, isApiError } from "@/lib/api";
 import { hapticNotification, hapticSelection, openExternalLink } from "@/lib/telegram";
 import type { ChannelSubscriptionsResponseDto, SubmissionResponseDto, TaskChannelDto, TaskDetailDto } from "@/lib/types";
 import { cn, formatRub, getErrorMessage } from "@/lib/utils";
@@ -23,7 +23,7 @@ import { TaskSuccess } from "./TaskSuccess";
  */
 export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   const toast = useToast();
-  const { setUser, authedFetch, status, retry } = useSession();
+  const { setUser } = useSession();
 
   // Каналы приходят с сервера из config/telegram-channels.ts (без chatId) —
   // список отдаётся всегда, даже если запрос ушёл без авторизации.
@@ -51,11 +51,10 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
 
     setIsChecking(true);
     try {
-      // Если сессия ещё не установлена (например, после возврата из Telegram),
-      // сначала повторяем обычный вход существующим механизмом.
-      if (status !== "ready") retry();
-
-      const response = await authedFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions");
+      // Запрос идёт через общий apiFetch: initData WebApp подставляется в заголовок
+      // X-Telegram-Init-Data, сервер валидирует его и берёт telegram_id оттуда.
+      // Ни cookie, ни повторный вход для проверки подписки не нужны.
+      const response = await apiFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions");
       setChannels((current) =>
         current.map((channel) => {
           const fresh = response.channels.find((item) => item.id === channel.id);
@@ -73,13 +72,8 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
     } catch (cause) {
       hapticNotification("error");
       const code = isApiError(cause) ? cause.code : "REQUEST_FAILED";
-      const isAuthProblem = code === "UNAUTHORIZED" || code === "INVALID_INIT_DATA";
       toast.show("Не удалось проверить подписку", {
-        description: isAuthProblem
-          ? "Сессия Telegram сбросилась. Закройте Mini App и откройте его заново из бота."
-          : isApiError(cause)
-            ? cause.message
-            : getErrorMessage(code),
+        description: isApiError(cause) ? cause.message : getErrorMessage(code),
         variant: "error",
       });
     } finally {
@@ -93,7 +87,8 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
     setIsSubmitting(true);
     try {
       // Сервер сам повторно проверяет подписку через getChatMember перед начислением.
-      const response = await authedFetch<SubmissionResponseDto>("/api/submissions", {
+      // initData уходит тем же заголовком, поэтому награда не зависит от cookie.
+      const response = await apiFetch<SubmissionResponseDto>("/api/submissions", {
         json: { taskId: task.id },
       });
       setUser(response.user);
