@@ -87,6 +87,13 @@ npm run dev
    в каждый запрос через `apiFetch`, `lib/api.ts`);
 2. подписанная cookie `voxy_state` — если заголовка нет или он невалиден.
 
+Клиент берёт initData через `getTelegramInitData()` (`lib/telegram.ts`) в порядке:
+`window.Telegram.WebApp.initData` → `sessionStorage` → `localStorage`. Сохранение нужно, потому
+что Telegram-клиент перезагружает WebView без `#tgWebAppData` (например, после возврата из канала,
+открытого кнопкой «ПОДАТЬ ЗАЯВКУ»), и тогда SDK отдаёт пустой initData. Значение передаётся
+только заголовком, в cookie и URL оно не попадает, а сервер всё равно проверяет HMAC-подпись и
+срок `auth_date` (сохранённое значение старше 23 часов клиент отбрасывает сам).
+
 Заголовок важнее cookie: Telegram Web/Desktop открывает Mini App в iframe, и браузер может
 не сохранить стороннюю cookie, а cookie из прошлой сессии может относиться к другому аккаунту.
 Поэтому `/api/profile`, `/api/channel-requests`, `/api/transactions` и остальные защищённые
