@@ -1,11 +1,12 @@
 import { getCurrentUser } from "@/lib/auth";
-import { getCompletedTaskIds, getRequestedChannelIds } from "@/lib/db";
+import { checkChannelSubscriptions } from "@/lib/channel-subscriptions";
+import { getCompletedTaskIds } from "@/lib/db";
 import { listDemoTasks, resolveDeadline } from "@/lib/demo-data";
 import { handleRouteError, jsonOk } from "@/lib/http";
 import {
   TELEGRAM_SUBSCRIPTION_TASK_TYPE,
   computeTaskState,
-  isSubscriptionComplete,
+  isSubscriptionTaskDone,
   serializeTaskSummary,
   subscriptionTaskFields,
 } from "@/lib/tasks";
@@ -17,19 +18,27 @@ export const dynamic = "force-dynamic";
  * GET /api/tasks
  *
  * Задания и прогресс текущего пользователя. Все пользовательские данные — из PostgreSQL.
- * Задание «Подписка на Telegram-каналы» обязательное: пока в channel_requests нет заявок
- * по всем трём каналам, остальные задания отдаются со статусом locked.
+ *
+ * Обязательное задание «Подписка на Telegram-каналы»: статусы каналов приходят из
+ * серверной проверки Telegram Bot API (`getChatMember`), а остальные задания закрыты,
+ * пока за обязательное задание не получена награда (server-side проверка всех подписок).
+ * Проверка подписки выполняется только для незавершённого обязательного задания.
  */
 export async function GET() {
   try {
     const user = await getCurrentUser();
 
-    const [completedIds, requestedChannelIds] = user
-      ? await Promise.all([getCompletedTaskIds(user.telegram_id), getRequestedChannelIds(user.telegram_id)])
-      : [[], []];
+    const completedIds = user ? await getCompletedTaskIds(user.telegram_id) : [];
+    const subscriptionDone = isSubscriptionTaskDone(completedIds);
 
     const deadline = resolveDeadline();
-    const subscriptionDone = isSubscriptionComplete(requestedChannelIds);
+
+    // Живая проверка подписок нужна только пока обязательное задание не выполнено.
+    const subscriptionCheck =
+      user && !subscriptionDone
+        ? await checkChannelSubscriptions(user.telegram_id).catch(() => null)
+        : null;
+    const subscriptionChannels = subscriptionCheck?.channels ?? [];
 
     const items = listDemoTasks().map((task) => {
       const isCompleted = completedIds.includes(task.id);
@@ -37,7 +46,7 @@ export async function GET() {
 
       return {
         ...serializeTaskSummary(task, deadline, computeTaskState(task, deadline, isCompleted, isLocked)),
-        ...subscriptionTaskFields(task.type, requestedChannelIds),
+        ...subscriptionTaskFields(task.type, subscriptionChannels),
       };
     });
     const total = items.length;

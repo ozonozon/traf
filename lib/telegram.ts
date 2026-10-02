@@ -89,7 +89,7 @@ export function initTelegram(): TelegramWebAppApi | null {
 /**
  * Ключ хранения initData. Хранится в sessionStorage и, как fallback, в localStorage:
  * Telegram-клиент может перезагрузить WebView без `#tgWebAppData` (например, после
- * возврата из канала, открытого кнопкой «ПОДАТЬ ЗАЯВКУ»), и тогда initData из SDK пуст.
+ * возврата из канала, открытого кнопкой «ПОДПИСАТЬСЯ»), и тогда initData из SDK пуст.
  * В cookie и URL initData НИКОГДА не попадает.
  */
 const INIT_DATA_STORAGE_KEY = "voxy-init-data";

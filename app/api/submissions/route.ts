@@ -1,10 +1,11 @@
 import type { NextRequest } from "next/server";
 
 import { toPublicUser } from "@/lib/auth";
-import { completeTask, getRequestedChannelIds, getTaskCompletion, type UserRow } from "@/lib/db";
+import { checkChannelSubscriptions, assertChannelsCheckable } from "@/lib/channel-subscriptions";
+import { completeTask, getCompletedTaskIds, getTaskCompletion, type UserRow } from "@/lib/db";
 import { findDemoTask, resolveDeadline } from "@/lib/demo-data";
 import { RouteError, handleRouteError, jsonOk, requireUser } from "@/lib/http";
-import { TELEGRAM_SUBSCRIPTION_TASK_TYPE, isSubscriptionComplete, serializeCompletion } from "@/lib/tasks";
+import { TELEGRAM_SUBSCRIPTION_TASK_TYPE, isSubscriptionTaskDone, serializeCompletion } from "@/lib/tasks";
 import { formatZodIssues, submissionSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -45,25 +46,33 @@ export async function POST(request: NextRequest) {
     }
 
     const isSubscriptionTask = task.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE;
-    const requestedChannelIds = await getRequestedChannelIds(user.telegram_id);
-    const subscriptionDone = isSubscriptionComplete(requestedChannelIds);
 
-    // Обязательное задание: заявки должны прийти от Telegram (не от нажатия кнопки).
-    if (isSubscriptionTask && !subscriptionDone) {
-      throw new RouteError(
-        "JOIN_REQUESTS_INCOMPLETE",
-        "Ожидаем подтверждение заявок от Telegram по всем каналам",
-        409,
-      );
+    // Обязательное задание: сервер САМ проверяет подписку через Telegram Bot API
+    // (getChatMember) непосредственно перед начислением. Клиенту здесь не доверяем:
+    // никакие allSubscribed/флаги из тела запроса не принимаются во внимание.
+    if (isSubscriptionTask) {
+      const check = await checkChannelSubscriptions(user.telegram_id);
+      assertChannelsCheckable(check);
+
+      if (!check.allSubscribed) {
+        throw new RouteError(
+          "SUBSCRIPTIONS_INCOMPLETE",
+          `Подписка подтверждена не по всем каналам (${check.subscribedCount} из ${check.total})`,
+          409,
+        );
+      }
     }
 
-    // Следующие задания закрыты, пока обязательное задание не выполнено.
-    if (!isSubscriptionTask && !subscriptionDone) {
-      throw new RouteError(
-        "TASKS_LOCKED",
-        "Сначала выполните обязательное задание «Подписка на Telegram-каналы»",
-        403,
-      );
+    // Следующие задания закрыты, пока за обязательное задание не получена награда.
+    if (!isSubscriptionTask) {
+      const completedIds = await getCompletedTaskIds(user.telegram_id);
+      if (!isSubscriptionTaskDone(completedIds)) {
+        throw new RouteError(
+          "TASKS_LOCKED",
+          "Сначала выполните обязательное задание «Подписка на Telegram-каналы»",
+          403,
+        );
+      }
     }
 
     if (!isSubscriptionTask) {

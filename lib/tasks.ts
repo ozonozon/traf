@@ -1,38 +1,46 @@
 import "server-only";
 
-import { TELEGRAM_CHANNELS, publicChannels } from "@/config/telegram-channels";
-
 import type { DemoTask } from "./demo-data";
 import type { TaskCompletionRow } from "./db";
-import { TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "./task-constants";
-import type { SubmissionDto, TaskChannelDto, TaskListItemDto, TaskState } from "./types";
+import { TELEGRAM_SUBSCRIPTION_TASK_ID, TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "./task-constants";
+import type { ChannelSubscriptionDto, SubmissionDto, TaskChannelDto, TaskListItemDto, TaskState } from "./types";
 
 export { TELEGRAM_SUBSCRIPTION_TASK_TYPE };
 
 /**
- * Данные каналов для задачи «Подписка на Telegram-каналы».
- * `requested` приходит из PostgreSQL (таблица channel_requests): true появляется
- * только после реального chat_join_request от Telegram. Нажатие кнопки не влияет.
+ * Данные каналов для задания «Подписка на Telegram-каналы».
+ *
+ * `subscribed` приходит из серверной проверки Telegram Bot API (`getChatMember`,
+ * lib/channel-subscriptions.ts) — то есть это факт подписки, а не нажатие кнопки.
  */
 export function subscriptionTaskFields(
   type: string,
-  requestedChannelIds: string[],
+  channels: ChannelSubscriptionDto[],
 ): {
   channels?: TaskChannelDto[];
 } {
   if (type !== TELEGRAM_SUBSCRIPTION_TASK_TYPE) return {};
 
   return {
-    channels: publicChannels().map((channel) => ({
-      ...channel,
-      requested: requestedChannelIds.includes(channel.id),
+    channels: channels.map((channel) => ({
+      index: channel.index,
+      id: channel.id,
+      title: channel.title,
+      description: channel.description,
+      inviteLink: channel.inviteLink,
+      subscribed: channel.subscribed,
     })),
   };
 }
 
-/** Все три заявки получены? */
-export function isSubscriptionComplete(requestedChannelIds: string[]): boolean {
-  return TELEGRAM_CHANNELS.every((channel) => requestedChannelIds.includes(channel.id));
+/**
+ * Обязательное задание выполнено? Опираемся на факт начисления награды за него
+ * (награда выдаётся только после серверной проверки всех подписок), поэтому
+ * остальные задания разблокируются после получения награды — без лишних запросов
+ * в Telegram Bot API на каждом открытии списка заданий.
+ */
+export function isSubscriptionTaskDone(completedTaskIds: string[]): boolean {
+  return completedTaskIds.includes(TELEGRAM_SUBSCRIPTION_TASK_ID);
 }
 
 /** Состояние задания для конкретного пользователя. */

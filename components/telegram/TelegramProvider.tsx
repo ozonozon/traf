@@ -82,7 +82,7 @@ function localUserFromTelegram(): PublicUserDto | null {
  *  3) сервер проверяет подпись и находит/создаёт пользователя в PostgreSQL;
  *  4) сервер ставит подписанную session cookie;
  *  5) только после успеха status становится "ready", и экраны (через useAuthedApi)
- *     начинают вызывать /api/channel-requests, /api/stats, /api/leaderboard,
+ *     начинают вызывать /api/channel-subscriptions, /api/profile, /api/leaderboard,
  *     /api/profile, /api/transactions. Раньше этого момента защищённые запросы не идут.
  */
 export function TelegramProvider({ children }: { children: ReactNode }) {

@@ -1,13 +1,14 @@
 import type { NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth";
-import { getRequestedChannelIds, getTaskCompletion } from "@/lib/db";
+import { checkChannelSubscriptions } from "@/lib/channel-subscriptions";
+import { getCompletedTaskIds, getTaskCompletion } from "@/lib/db";
 import { findDemoTask, resolveDeadline } from "@/lib/demo-data";
 import { RouteError, handleRouteError, jsonOk } from "@/lib/http";
 import {
   TELEGRAM_SUBSCRIPTION_TASK_TYPE,
   computeTaskState,
-  isSubscriptionComplete,
+  isSubscriptionTaskDone,
   serializeCompletion,
   serializeTaskSummary,
   subscriptionTaskFields,
@@ -30,18 +31,24 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
       throw new RouteError("TASK_NOT_ACTIVE", "Задание больше не доступно", 404);
     }
 
-    const [completion, requestedChannelIds] = user
-      ? await Promise.all([getTaskCompletion(user.telegram_id, task.id), getRequestedChannelIds(user.telegram_id)])
+    const [completion, completedIds] = user
+      ? await Promise.all([getTaskCompletion(user.telegram_id, task.id), getCompletedTaskIds(user.telegram_id)])
       : [null, []];
 
+    // Статусы каналов — из серверной проверки Telegram Bot API getChatMember.
+    const subscriptionCheck =
+      user && task.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE && !completion
+        ? await checkChannelSubscriptions(user.telegram_id).catch(() => null)
+        : null;
+
     const deadline = resolveDeadline();
-    const isLocked = task.type !== TELEGRAM_SUBSCRIPTION_TASK_TYPE && !isSubscriptionComplete(requestedChannelIds);
+    const isLocked = task.type !== TELEGRAM_SUBSCRIPTION_TASK_TYPE && !isSubscriptionTaskDone(completedIds);
     const state = computeTaskState(task, deadline, Boolean(completion), isLocked);
 
     return jsonOk({
       task: {
         ...serializeTaskSummary(task, deadline, state),
-        ...subscriptionTaskFields(task.type, requestedChannelIds),
+        ...subscriptionTaskFields(task.type, subscriptionCheck?.channels ?? []),
         conditions: task.conditions,
         options: task.options.map((option) => ({ id: option.id, text: option.text })),
         submission: completion ? serializeCompletion(completion) : null,

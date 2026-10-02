@@ -22,14 +22,14 @@ export type TaskState = "available" | "completed" | "expired" | "paused" | "lock
 
 /** Публичные данные Telegram-канала для задания «Подписка на Telegram-каналы». */
 export interface TaskChannelDto {
-  /** Номер канала 1..3 (совпадает с channel1Requested…channel3Requested в состоянии). */
+  /** Номер канала 1..3 (совпадает с channel1Subscribed…channel3Subscribed в состоянии). */
   index: 1 | 2 | 3;
   id: string;
   title: string;
   description: string;
-  url: string;
-  /** true — Telegram прислал chat_join_request по этому каналу. Только серверное значение. */
-  requested: boolean;
+  inviteLink: string;
+  /** true — сервер подтвердил подписку через Telegram Bot API getChatMember. */
+  subscribed: boolean;
 }
 
 export interface TaskListItemDto {
@@ -151,7 +151,25 @@ export interface LeaderboardResponseDto {
   currentUser: LeaderboardCurrentUserDto | null;
 }
 
-/** Ответ GET /api/channel-requests — статусы заявок текущего пользователя. */
+/** Ответ GET /api/channel-subscriptions — фактическая подписка на обязательные каналы. */
+export interface ChannelSubscriptionDto {
+  id: string;
+  index: 1 | 2 | 3;
+  title: string;
+  description: string;
+  inviteLink: string;
+  /** true — Telegram Bot API подтвердил подписку (member / administrator / creator). */
+  subscribed: boolean;
+}
+
+export interface ChannelSubscriptionsResponseDto {
+  channels: ChannelSubscriptionDto[];
+  subscribedCount: number;
+  total: number;
+  allSubscribed: boolean;
+}
+
+/** Ответ GET /api/channel-requests (legacy: заявки chat_join_request). */
 export interface ChannelRequestsResponseDto {
   channels: Array<{ id: string; index: 1 | 2 | 3; title: string; requested: boolean }>;
   requestedCount: number;

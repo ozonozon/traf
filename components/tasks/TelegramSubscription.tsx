@@ -8,18 +8,18 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { isApiError } from "@/lib/api";
 import { hapticNotification, hapticSelection, openExternalLink } from "@/lib/telegram";
-import type { ChannelRequestsResponseDto, SubmissionResponseDto, TaskChannelDto, TaskDetailDto } from "@/lib/types";
-import { cn, formatRub } from "@/lib/utils";
+import type { ChannelSubscriptionsResponseDto, SubmissionResponseDto, TaskChannelDto, TaskDetailDto } from "@/lib/types";
+import { cn, formatRub, getErrorMessage } from "@/lib/utils";
 
 import { TaskSuccess } from "./TaskSuccess";
 
 /**
- * Задание «Подписка на Telegram-каналы».
+ * Обязательное задание «Подписка на Telegram-каналы».
  *
- * Три карточки с кнопкой «ПОДАТЬ ЗАЯВКУ» — каждая открывает постоянную invite-ссылку канала.
- * Клик по кнопке НИЧЕГО не засчитывает: заявка считается отправленной только после того,
- * как Telegram прислал webhook-событие chat_join_request и сервер записал её в PostgreSQL.
- * Статусы подтягиваются кнопкой «ПРОВЕРИТЬ ЗАЯВКИ» (GET /api/channel-requests).
+ * Кнопка «ПОДПИСАТЬСЯ» только открывает invite-ссылку канала (Telegram.WebApp.openTelegramLink)
+ * и ничего не засчитывает. Подписку определяет исключительно сервер: GET /api/channel-subscriptions
+ * вызывает Telegram Bot API getChatMember для каждого канала. Награда выдаётся после того,
+ * как сервер повторно подтвердит все три подписки.
  */
 export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   const toast = useToast();
@@ -34,41 +34,41 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   );
   const [isFresh, setIsFresh] = useState(false);
 
-  const requestedCount = channels.filter((channel) => channel.requested).length;
-  const allRequested = channels.length > 0 && requestedCount === channels.length;
+  const subscribedCount = channels.filter((channel) => channel.subscribed).length;
+  const allSubscribed = channels.length > 0 && subscribedCount === channels.length;
 
   function handleSubscribe(channel: TaskChannelDto) {
     hapticSelection();
-    // Ссылку открывает нативный метод Telegram: внутри Mini App переход остаётся в Telegram.
-    // Статус канала от этого клика НЕ меняется.
-    openExternalLink(channel.url);
+    // Открывает канал в Telegram. Подписка здесь НЕ засчитывается — только сервер.
+    openExternalLink(channel.inviteLink);
   }
 
-  /** Запрашивает реальные статусы заявок из PostgreSQL. Кнопка доступна всегда. */
+  /** Спрашивает у сервера фактическую подписку (getChatMember) по всем каналам. */
   async function handleCheck() {
     if (isChecking) return;
 
     setIsChecking(true);
     try {
-      const response = await authedFetch<ChannelRequestsResponseDto>("/api/channel-requests");
+      const response = await authedFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions");
       setChannels((current) =>
         current.map((channel) => {
           const fresh = response.channels.find((item) => item.id === channel.id);
-          return fresh ? { ...channel, requested: fresh.requested } : channel;
+          return fresh ? { ...channel, subscribed: fresh.subscribed } : channel;
         }),
       );
       setHasChecked(true);
-      hapticNotification(response.allRequested ? "success" : "warning");
-      toast.show(`Заявки: ${response.requestedCount} из ${response.total}`, {
-        description: response.allRequested
-          ? "Все заявки подтверждены — задание можно завершить"
-          : "Отправь заявки через кнопки выше и проверь ещё раз",
-        variant: response.allRequested ? "success" : "default",
+      hapticNotification(response.allSubscribed ? "success" : "warning");
+      toast.show(`Подписки: ${response.subscribedCount} из ${response.total}`, {
+        description: response.allSubscribed
+          ? "Все подписки подтверждены — задание можно завершить"
+          : "Подпишитесь на каналы выше и проверьте ещё раз",
+        variant: response.allSubscribed ? "success" : "default",
       });
     } catch (cause) {
       hapticNotification("error");
-      toast.show("Не удалось проверить заявки", {
-        description: isApiError(cause) ? cause.message : "Попробуйте позже",
+      const code = isApiError(cause) ? cause.code : "REQUEST_FAILED";
+      toast.show("Не удалось проверить подписку", {
+        description: isApiError(cause) ? cause.message : getErrorMessage(code),
         variant: "error",
       });
     } finally {
@@ -77,10 +77,11 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   }
 
   async function handleSubmit() {
-    if (isSubmitting || !allRequested) return;
+    if (isSubmitting || !allSubscribed) return;
 
     setIsSubmitting(true);
     try {
+      // Сервер сам повторно проверяет подписку через getChatMember перед начислением.
       const response = await authedFetch<SubmissionResponseDto>("/api/submissions", {
         json: { taskId: task.id },
       });
@@ -96,7 +97,7 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
       const code = isApiError(cause) ? cause.code : "REQUEST_FAILED";
       hapticNotification("error");
       toast.show("Не удалось выполнить задание", {
-        description: isApiError(cause) ? cause.message : "Попробуйте позже",
+        description: isApiError(cause) ? cause.message : getErrorMessage(code),
         variant: "error",
       });
       if (code === "TASK_ALREADY_COMPLETED") {
@@ -115,12 +116,12 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   return (
     <div className="space-y-3.5">
       <p className="px-1 text-[13px] leading-snug text-muted">
-        Подай заявку во все {channels.length} канала — у каждого своя кнопка «ПОДАТЬ ЗАЯВКУ». Когда заявки будут
-        отправлены, нажми «ПРОВЕРИТЬ ЗАЯВКИ».
+        Подпишись на все {channels.length} канала — у каждого своя кнопка «ПОДПИСАТЬСЯ». Когда подписки будут
+        оформлены, нажми «ПРОВЕРИТЬ ПОДПИСКУ».
       </p>
 
       {channels.map((channel, index) => {
-        const isRequested = channel.requested;
+        const isSubscribed = channel.subscribed;
 
         return (
           <section key={channel.id} className="card-surface p-4">
@@ -128,7 +129,7 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
               <span
                 className={cn(
                   "flex size-11 shrink-0 items-center justify-center rounded-full text-[18px] font-extrabold",
-                  isRequested ? "bg-success-soft text-success" : "bg-primary-soft text-primary",
+                  isSubscribed ? "bg-success-soft text-success" : "bg-primary-soft text-primary",
                 )}
                 aria-hidden
               >
@@ -143,53 +144,56 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
             <p
               className={cn(
                 "mt-3 flex items-center gap-1.5 text-[12.5px] font-semibold",
-                isRequested ? "text-success" : "text-muted",
+                isSubscribed ? "text-success" : hasChecked ? "text-error" : "text-muted",
               )}
             >
-              {isRequested ? <Check size={14} strokeWidth={3} /> : <Clock size={13} />}
-              {isRequested ? "Заявка отправлена" : "Ожидаем заявку"}
+              {isSubscribed ? <Check size={14} strokeWidth={3} /> : <Clock size={13} />}
+              {isSubscribed ? "Подписка подтверждена" : hasChecked ? "Не подписан" : "Подписка не проверена"}
             </p>
 
             <Button
-              variant={isRequested ? "secondary" : "primary"}
+              variant={isSubscribed ? "secondary" : "primary"}
               size="md"
               className="mt-3"
               onClick={() => handleSubscribe(channel)}
             >
-              ПОДАТЬ ЗАЯВКУ
+              ПОДПИСАТЬСЯ
             </Button>
           </section>
         );
       })}
 
       <section className="card-surface p-4">
-        <p className="text-[15.5px] font-bold">Заявки: {requestedCount} из {channels.length}</p>
+        <p className="text-[15.5px] font-bold">
+          Подписки: {subscribedCount} из {channels.length}
+        </p>
 
-        {allRequested ? (
+        {allSubscribed ? (
           <p className="mt-2 flex items-center gap-1.5 text-[13px] font-semibold text-success">
             <Check size={15} strokeWidth={3} />
-            Все заявки подтверждены
+            Все подписки подтверждены
           </p>
-        ) : hasChecked && requestedCount === 0 ? (
+        ) : hasChecked ? (
           <p className="mt-2 text-[13px] leading-snug text-muted">
-            Пока ни одной заявки не найдено. Отправь заявки через кнопки выше и нажми «Проверить заявки» ещё раз.
+            Telegram подтвердил {subscribedCount} из {channels.length}. Подпишитесь на остальные каналы и нажмите
+            «ПРОВЕРИТЬ ПОДПИСКУ» ещё раз.
           </p>
         ) : (
           <p className="mt-2 text-[13px] leading-snug text-muted">
-            Заявка засчитывается только после того, как Telegram пришлёт её на сервер.
+            Подписка засчитывается только по данным Telegram — после нажатия «ПРОВЕРИТЬ ПОДПИСКУ».
           </p>
         )}
       </section>
 
       <div className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[900px] border-t border-border bg-card/95 px-5 pt-3 pb-[calc(14px+env(safe-area-inset-bottom,0px))] backdrop-blur-md">
-        {allRequested ? (
+        {allSubscribed ? (
           <Button variant="primary" onClick={handleSubmit} isLoading={isSubmitting}>
-            Получить вознаграждение
+            ПОЛУЧИТЬ ВОЗНАГРАЖДЕНИЕ
           </Button>
         ) : (
           <Button variant="primary" onClick={handleCheck} isLoading={isChecking}>
             {isChecking ? null : <RefreshCw size={17} />}
-            ПРОВЕРИТЬ ЗАЯВКИ
+            ПРОВЕРИТЬ ПОДПИСКУ
           </Button>
         )}
       </div>

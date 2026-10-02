@@ -115,6 +115,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   TASK_NOT_ACTIVE: "Задание больше не доступно",
   TASK_EXPIRED: "Срок выполнения задания истёк",
   TASK_ALREADY_COMPLETED: "Вы уже выполняли это задание",
+  SUBSCRIPTIONS_INCOMPLETE: "Подписка подтверждена не по всем каналам",
+  TELEGRAM_CHANNEL_CHECK_FAILED: "Не удалось проверить подписку. Попробуйте позже",
   JOIN_REQUESTS_INCOMPLETE: "Ожидаем подтверждение заявок от Telegram",
   TASKS_LOCKED: "Сначала выполните обязательное задание «Подписка на Telegram-каналы»",
   INVALID_TICKET: "Ссылка подтверждения недействительна",

@@ -257,7 +257,8 @@ Telegram Update на `/api/telegram/webhook` — так проверяется �
 | GET | `/api/tasks` | задания + прогресс; для `TELEGRAM_SUBSCRIPTION` — каналы и статусы заявок, остальные задания `locked` до 3/3 |
 | GET | `/api/tasks/[id]` | задание, варианты ответов, результат пользователя, каналы |
 | POST | `/api/submissions` | выполнение задания одной транзакцией PostgreSQL (`task_completions` + `transactions` + баланс) |
-| GET | `/api/channel-requests` | статус заявок из `channel_requests` (кнопка «Проверить заявки») |
+| GET | `/api/channel-requests` | ⚠️ legacy: заявки `chat_join_request` (новая механика не использует) |
+| GET | `/api/channel-subscriptions` | фактическая подписка на обязательные каналы: сервер вызывает `getChatMember` по каждому каналу из `config/telegram-channels.ts` |
 | GET | `/api/profile` | профиль и статистика из базы (место в рейтинге, выполнено сегодня) |
 | GET | `/api/transactions` | история виртуальных операций пользователя (пагинация) |
 | GET | `/api/leaderboard` | ТОП-30 по `total_earned DESC` + блок текущего пользователя |
@@ -271,24 +272,37 @@ Telegram Update на `/api/telegram/webhook` — так проверяется �
 ## Задание «Подписка на Telegram-каналы»
 
 Тип задания: `TELEGRAM_SUBSCRIPTION` — обязательное первое задание (+330 ₽).
-Пока Telegram не пришлёт заявки по всем трём каналам, остальные задания закрыты.
+Пока сервер не подтвердит подписку на все три канала, остальные задания закрыты.
 
 **Где менять каналы:** `config/telegram-channels.ts` — единственное место.
-У каждого канала есть `index` (1…3), `title`, `description`, постоянная invite-ссылка
-`url` и необязательный `chatId` (второй признак для сопоставления заявки).
+У каждого канала есть `index` (1…3), `title`, `description`, invite-ссылка `inviteLink`
+и обязательный `chatId` (`-1001234567890` или `@username`).
 
 Как это работает:
 
-- кнопка «Подписаться» открывает invite-ссылку через `Telegram.WebApp.openTelegramLink()`
+- кнопка **«ПОДПИСАТЬСЯ»** открывает `inviteLink` через `Telegram.WebApp.openTelegramLink()`
   и **сама по себе ничего не засчитывает**;
-- бот-администратор получает `chat_join_request` → webhook определяет канал по
-  `invite_link.invite_link` и пишет строку в `channel_requests`
-  (`INSERT ... ON CONFLICT (telegram_id, channel_id) DO NOTHING`);
-- в задании есть кнопка **«Проверить заявки»**: она запрашивает `GET /api/channel-requests`,
-  который читает `channel_requests` из PostgreSQL и возвращает счётчик `N/3` и статусы
-  «Ожидаем заявку» / «Запрос отправлен»;
-- при `3/3` задание можно завершить (начисление +330 ₽), остальные задания открываются;
-- `getChatMember` не используется, отдельные invite-ссылки для пользователей не создаются.
+- кнопка **«ПРОВЕРИТЬ ПОДПИСКУ»** запрашивает `GET /api/channel-subscriptions`: сервер для
+  каждого канала вызывает Telegram Bot API `getChatMember(chat_id, user_id=<telegram_id из сессии>)`;
+  подпиской считаются статусы `member`, `administrator`, `creator` (и `restricted` с `is_member`);
+  `left`, `kicked` и любые ошибки Telegram — не подписка;
+- награда при `3/3`: `POST /api/submissions` **сам повторно** проверяет все каналы через
+  `getChatMember` перед начислением — флаги с клиента не принимаются;
+- старые `chat_join_request` / `channel_requests` для этой механики не используются
+  (webhook и роут `/api/channel-requests` оставлены как legacy и нигде не вызываются UI).
+
+### Что нужно настроить, чтобы проверка работала
+
+1. Бот добавлен **в каждый обязательный канал**.
+2. Для приватных каналов и каналов без публичного `@username` бот должен быть
+   **администратором** — иначе Telegram отвечает `chat not found` / `not enough rights`,
+   и endpoint вернёт `TELEGRAM_CHANNEL_CHECK_FAILED` (503) с понятным текстом.
+3. В `config/telegram-channels.ts` у каждого канала заполнен `chatId` (`-100…` или `@username`).
+4. `TELEGRAM_BOT_TOKEN` задан в Vercel (Production и Preview) — токен используется только
+   на сервере и никогда не попадает в клиентский бандл.
+
+Если проверка невозможна (нет `chatId`, бот не в каналах, Telegram недоступен), API отвечает
+`503 TELEGRAM_CHANNEL_CHECK_FAILED` — это ошибка настройки, а не «пользователь не подписан».
 
 ## Рейтинг и статистика
 

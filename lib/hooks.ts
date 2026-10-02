@@ -75,7 +75,7 @@ export function useApi<T>(url: string | null, options?: UseApiOptions): UseApiRe
  * Хук для запросов экранов приложения.
  *
  * Порядок важен: пока идёт вход (session.status === "loading"), запрос не отправляется —
- * поэтому `/api/channel-requests`, `/api/profile`, `/api/transactions` не могут уйти раньше,
+ * поэтому `/api/channel-subscriptions`, `/api/profile`, `/api/transactions` не могут уйти раньше,
  * чем сервер поставит session cookie. Как только вход завершился (успешно ИЛИ ошибкой),
  * запрос уходит: публичные роуты (`/api/stats`, `/api/leaderboard`, `/api/tasks`) отдают
  * данные и без сессии, а защищённые возвращают честный 401/500 — экран покажет ответ сервера

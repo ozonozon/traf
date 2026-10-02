@@ -36,9 +36,9 @@ export const DEMO_TASKS: DemoTask[] = [
     id: TELEGRAM_SUBSCRIPTION_TASK_ID,
     icon: "✈️",
     title: "Подписка на Telegram-каналы",
-    description: "Отправьте заявки на вступление в 3 закрытых Telegram-канала.",
+    description: "Подпишитесь на 3 Telegram-канала из задания.",
     conditions:
-      "Нажмите «Подписаться» в каждой карточке и отправьте заявку на вступление. Канал считается пройденным после того, как Telegram пришлёт заявку — нажатие кнопки статус не меняет.",
+      "Нажмите «ПОДПИСАТЬСЯ» в каждой карточке и подпишитесь на канал. Подписка засчитывается только по данным Telegram: после подписки нажмите «ПРОВЕРИТЬ ПОДПИСКУ» — сервер сам проверит её через Bot API.",
     virtualTarget: "Telegram-каналы",
     type: TELEGRAM_SUBSCRIPTION_TASK_TYPE,
     reward: 330,
