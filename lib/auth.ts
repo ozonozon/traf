@@ -125,13 +125,13 @@ export async function getCurrentUser(): Promise<UserRow | null> {
 }
 
 /**
- * Пользователь по initData, пришедшему заголовком вместо cookie.
+ * Пользователь по initData, пришедшему заголовком (или прямо из запроса).
  *
  * Используется, когда клиент не прислал сессионную cookie (Telegram Web/Desktop
  * открывает Mini App в iframe, и браузер может не сохранить стороннюю cookie).
- * Проверка та же самая, что и при входе: HMAC-подпись initData из TELEGRAM_BOT_TOKEN.
- * Пользователь только читается из PostgreSQL — запись здесь не нужна, потому что
- * вход по /api/auth/telegram уже создал его.
+ * Проверка та же самая, что и при входе: HMAC-подпись initData из TELEGRAM_BOT_TOKEN
+ * плюс срок auth_date. Если пользователя ещё нет в PostgreSQL — создаём его тем же
+ * upsert, что и вход (INSERT ... ON CONFLICT DO UPDATE), чтобы данные не потерялись.
  */
 export async function getUserFromInitData(rawInitData: string | null): Promise<UserRow | null> {
   const botToken = getTelegramBotToken();
@@ -140,5 +140,15 @@ export async function getUserFromInitData(rawInitData: string | null): Promise<U
   const verification = validateTelegramInitData(rawInitData, botToken);
   if (!verification.valid || !verification.user) return null;
 
-  return getUserByTelegramId(String(verification.user.id));
+  const telegramId = String(verification.user.id);
+  const existing = await getUserByTelegramId(telegramId);
+  if (existing) return existing;
+
+  return upsertUser({
+    telegramId,
+    username: verification.user.username ?? null,
+    firstName: verification.user.first_name || "Пользователь",
+    lastName: verification.user.last_name ?? null,
+    photoUrl: verification.user.photo_url ?? null,
+  });
 }

@@ -1,9 +1,16 @@
-import { query } from "@/lib/db";
+import { headers } from "next/headers";
+import type { NextRequest } from "next/server";
+
+import { getUserFromInitData, toPublicUser } from "@/lib/auth";
+import { getRequestedChannelIds, query } from "@/lib/db";
 import { getTelegramBotToken } from "@/lib/env";
 import { jsonOk } from "@/lib/http";
+import { SESSION_COOKIE } from "@/lib/session";
+import { TELEGRAM_INIT_DATA_HEADER } from "@/lib/telegram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
 
 /**
  * Яркая диагностика production-окружения без секретов.
@@ -18,7 +25,7 @@ export const dynamic = "force-dynamic";
  * Побочный эффект: обращение к базе запускает ensureSchema() из lib/db.ts,
  * то есть на «чистой» базе таблицы создадутся, и повторный вызов вернёт schema: true.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
 
   const config = {
@@ -43,11 +50,56 @@ export async function GET() {
     database = { ...database, error: describeDatabaseError(error) };
   }
 
-  return jsonOk({
+  const payload: Record<string, unknown> = {
     ok: database.schema,
     database,
     config,
-  });
+  };
+
+  // ?auth=1 — чем авторизован именно этот запрос. Нужно, чтобы проверить Mini App
+  // изнутри Telegram (открыть этот URL в WebView и увидеть cookie/заголовок/telegram_id).
+  if (request.nextUrl.searchParams.get("auth") === "1") {
+    payload.auth = await describeRequestAuth();
+  }
+
+  return jsonOk(payload);
+}
+
+/**
+ * Как авторизован текущий запрос: есть ли session cookie, есть ли initData,
+ * какой telegram_id получился и сколько у него заявок. Без секретов — только
+ * данные самого вызывающего.
+ */
+async function describeRequestAuth() {
+  const requestHeaders = await headers();
+  const initDataHeader = requestHeaders.get(TELEGRAM_INIT_DATA_HEADER);
+  const hasCookie = Boolean(requestHeaders.get("cookie")?.includes(`${SESSION_COOKIE}=`));
+
+  const user = await getUserFromInitData(initDataHeader);
+
+  if (!user) {
+    return {
+      initDataHeader: initDataHeader ? "present-but-invalid" : "absent",
+      cookie: hasCookie ? "present" : "absent",
+      telegramId: null,
+      userInDb: false,
+      channelRequests: 0,
+      requestedChannelIds: [] as string[],
+      note: "запрос без валидного Telegram initData и без подходящей cookie",
+    };
+  }
+
+  const requestedChannelIds = await getRequestedChannelIds(user.telegram_id);
+
+  return {
+    initDataHeader: "valid",
+    cookie: hasCookie ? "present" : "absent",
+    telegramId: user.telegram_id,
+    userInDb: true,
+    user: toPublicUser(user),
+    channelRequests: requestedChannelIds.length,
+    requestedChannelIds,
+  };
 }
 
 /** Короткая причина сбоя базы: только код PostgreSQL, без деталей подключения. */

@@ -86,9 +86,41 @@ export function initTelegram(): TelegramWebAppApi | null {
   return webApp;
 }
 
-/** Строка initData для серверной валидации. */
+/** Ключ sessionStorage: последний initData этой вкладки Mini App. */
+const INIT_DATA_STORAGE_KEY = "voxy-init-data";
+
+/** Последний initData этой вкладки (пустая строка, если его ещё не было). */
+function readCachedInitData(): string {
+  try {
+    return window.sessionStorage.getItem(INIT_DATA_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Строка initData для серверной валидации.
+ *
+ * Если Telegram-клиент перезагрузил WebView без `#tgWebAppData` (так бывает после
+ * возврата из канала, ссылку на который открывала кнопка «ПОДАТЬ ЗАЯВКУ»), SDK отдаёт
+ * пустой initData. Тогда берём последний initData этой вкладки. Ослабления проверки нет:
+ * сервер по-прежнему проверяет HMAC-подпись и срок auth_date (24 часа) — просто у запроса
+ * остаётся подтверждение вместо 401.
+ */
 export function getInitData(): string {
-  return getWebApp()?.initData ?? "";
+  if (typeof window === "undefined") return "";
+
+  const live = getWebApp()?.initData ?? "";
+  if (live) {
+    try {
+      window.sessionStorage.setItem(INIT_DATA_STORAGE_KEY, live);
+    } catch {
+      // Приватный режим/запрет storage — не критично, работаем без кэша.
+    }
+    return live;
+  }
+
+  return readCachedInitData();
 }
 
 /**
@@ -111,6 +143,14 @@ export const TELEGRAM_INIT_DATA_HEADER = "x-telegram-init-data";
  */
 export async function waitForInitData(timeoutMs = 8000, stepMs = 150): Promise<string> {
   if (typeof window === "undefined") return "";
+
+  // Если в этой вкладке уже был валидный initData (например, страница перезагружена
+  // Telegram-клиентом без #tgWebAppData), не ждём SDK повторно.
+  const cached = readCachedInitData();
+  if (cached && !getWebApp()?.initData) {
+    initTelegram();
+    return cached;
+  }
 
   const startedAt = Date.now();
   const deadline = startedAt + timeoutMs;

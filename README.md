@@ -80,6 +80,18 @@ npm run dev
   iframe Telegram Web/Desktop), `lax` локально, TTL 30 дней;
 - баланс, заявки, выполненные задания и операции в cookie **не хранятся** — они в PostgreSQL.
 
+Сервер (`requireUser()` в `lib/http.ts`) принимает две формы подтверждения, обе проверяются
+одной функцией `validateTelegramInitData`:
+
+1. заголовок `X-Telegram-Init-Data` — свежий initData текущего Mini App (клиент добавляет его
+   в каждый запрос через `apiFetch`, `lib/api.ts`);
+2. подписанная cookie `voxy_state` — если заголовка нет или он невалиден.
+
+Заголовок важнее cookie: Telegram Web/Desktop открывает Mini App в iframe, и браузер может
+не сохранить стороннюю cookie, а cookie из прошлой сессии может относиться к другому аккаунту.
+Поэтому `/api/profile`, `/api/channel-requests`, `/api/transactions` и остальные защищённые
+роуты авторизуются одинаково и работают даже без cookie. Без обоих источников — `401`.
+
 ### Порядок авторизации (нельзя нарушать)
 
 1. `TelegramProvider` (`components/telegram/TelegramProvider.tsx`) ждёт `initData` от
@@ -107,6 +119,10 @@ npm run dev
 `database.configured/reachable/schema`, короткую причину сбоя (`SCHEMA_MISSING`,
 `AUTH_FAILED`, `HOST_NOT_FOUND`, …) и наличие `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`,
 `AUTH_SECRET`, `NEXT_PUBLIC_APP_URL` (только `true/false`).
+`GET /api/health?auth=1` дополнительно показывает, **чем авторизован именно этот запрос**:
+`initDataHeader` (`valid` / `present-but-invalid` / `absent`), `cookie` (`present`/`absent`),
+получившийся `telegramId`, наличие пользователя в базе и его `requestedChannelIds`.
+Эту ссылку можно открыть прямо в Telegram Mini App и сразу увидеть, доходят ли cookie и initData.
 
 ## Деплой на Vercel
 

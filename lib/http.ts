@@ -66,18 +66,29 @@ export function handleRouteError(error: unknown): NextResponse {
  * Пользователь из подписанной сессии или 401.
  * Telegram id и userId с фронтенда никогда не принимаются как доверенные.
  *
- * Если сессионной cookie нет, принимается initData в заголовке `X-Telegram-Init-Data`
- * (тот же формат и та же проверка подписи, что при входе). Это нужно для случаев, когда
- * Telegram-клиент не сохраняет cookie (Mini App в iframe) — иначе кнопки защищённых
- * действий отвечали бы 401 при полностью рабочем входе.
+ * Порядок источников (оба используют одну и ту же проверку подписи Telegram):
+ *  1. initData в заголовке `X-Telegram-Init-Data` — свежие данные текущего Mini App;
+ *  2. подписанная session cookie `voxy_state` — если заголовка нет или он невалиден.
+ *
+ * Заголовок важнее cookie: cookie могла не сохраниться (Mini App в iframe, блокировка
+ * сторонних cookie) или остаться от прошлой сессии, а initData подписан Telegram для
+ * пользователя, открывшего приложение сейчас. Без обоих источников — 401, как раньше.
  */
 export async function requireUser(): Promise<UserRow> {
+  const requestHeaders = await headers();
+  const initDataHeader = requestHeaders.get(TELEGRAM_INIT_DATA_HEADER);
+
+  const userFromInitData = await getUserFromInitData(initDataHeader);
+  if (userFromInitData) return userFromInitData;
+
   const user = await getCurrentUser();
   if (user) return user;
 
-  const initDataHeader = (await headers()).get(TELEGRAM_INIT_DATA_HEADER);
-  const userFromInitData = await getUserFromInitData(initDataHeader);
-  if (userFromInitData) return userFromInitData;
+  // Диагностика причины 401 для логов Vercel (без значений, только факт наличия).
+  console.warn(
+    `[auth] 401: initData ${initDataHeader ? "пришёл, но невалиден" : "не пришёл"}, ` +
+      `cookie ${requestHeaders.get("cookie") ? "есть, но не подошла" : "нет"}`,
+  );
 
   throw new RouteError("UNAUTHORIZED", "Нужно открыть приложение внутри Telegram", 401);
 }
