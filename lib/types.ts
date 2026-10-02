@@ -151,6 +151,14 @@ export interface LeaderboardResponseDto {
   currentUser: LeaderboardCurrentUserDto | null;
 }
 
+/** Ответ GET /api/channel-requests — статусы заявок текущего пользователя. */
+export interface ChannelRequestsResponseDto {
+  channels: Array<{ id: string; index: 1 | 2 | 3; title: string; requested: boolean }>;
+  requestedCount: number;
+  total: number;
+  allRequested: boolean;
+}
+
 export interface StatsResponseDto {
   participantsCount: number;
   minimumReward: number;

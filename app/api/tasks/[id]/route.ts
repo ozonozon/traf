@@ -1,14 +1,14 @@
 import type { NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth";
+import { getRequestedChannelIds, getTaskCompletion } from "@/lib/db";
 import { findDemoTask, resolveDeadline } from "@/lib/demo-data";
 import { RouteError, handleRouteError, jsonOk } from "@/lib/http";
-import { findSubmission } from "@/lib/store";
 import {
   TELEGRAM_SUBSCRIPTION_TASK_TYPE,
   computeTaskState,
   isSubscriptionComplete,
-  serializeSubmission,
+  serializeCompletion,
   serializeTaskSummary,
   subscriptionTaskFields,
 } from "@/lib/tasks";
@@ -16,7 +16,7 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** GET /api/tasks/[id] — задание, его варианты ответов и submission текущего пользователя. */
+/** GET /api/tasks/[id] — задание, его варианты ответов и результат текущего пользователя. */
 export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params;
@@ -30,22 +30,24 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
       throw new RouteError("TASK_NOT_ACTIVE", "Задание больше не доступно", 404);
     }
 
+    const [completion, requestedChannelIds] = user
+      ? await Promise.all([getTaskCompletion(user.telegram_id, task.id), getRequestedChannelIds(user.telegram_id)])
+      : [null, []];
+
     const deadline = resolveDeadline();
-    const submission = user ? findSubmission(user, task.id) : null;
-    const isLocked = task.type !== TELEGRAM_SUBSCRIPTION_TASK_TYPE && !isSubscriptionComplete(user);
-    const state = computeTaskState(task, deadline, Boolean(submission), isLocked);
+    const isLocked = task.type !== TELEGRAM_SUBSCRIPTION_TASK_TYPE && !isSubscriptionComplete(requestedChannelIds);
+    const state = computeTaskState(task, deadline, Boolean(completion), isLocked);
 
     return jsonOk({
       task: {
         ...serializeTaskSummary(task, deadline, state),
-        ...subscriptionTaskFields(task.type, user),
+        ...subscriptionTaskFields(task.type, requestedChannelIds),
         conditions: task.conditions,
         options: task.options.map((option) => ({ id: option.id, text: option.text })),
-        submission: submission ? serializeSubmission(submission) : null,
+        submission: completion ? serializeCompletion(completion) : null,
       },
     });
   } catch (error) {
     return handleRouteError(error);
   }
 }
-

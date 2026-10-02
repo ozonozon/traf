@@ -6,21 +6,52 @@
 > Google Maps и маркетплейсами, не получает реальных денег и не совершает
 > никаких финансовых операций. Все `₽` — внутриигровая валюта приложения.
 
-## MVP: без базы данных
+## Хранилище: PostgreSQL
 
-Приложение разворачивается на Vercel «как есть»: **никакой БД, миграций и Neon**.
-Внешняя база не нужна ни для установки, ни для сборки, ни для работы.
+Состояние пользователей, заявки, выполненные задания и операции лежат в PostgreSQL
+(Neon или локальный сервер). Доступ — через пакет `pg` из одного server-only модуля
+`lib/db.ts`, без ORM и без слоя репозиториев.
 
-| Что | Как сделано |
+| Что | Где хранится |
 | --- | --- |
-| Задания | 3 тренировочных задания описаны в коде: `lib/demo-data.ts` |
-| Участники рейтинга | 110 демо-профилей в коде; ежедневная динамика выводится из даты |
-| Статистика главного экрана | стартовые значения + прирост, выводимый из даты (`lib/demo-data.ts`) |
-| Состояние пользователя (баланс, выполненные задания, история) | подписанная httpOnly-cookie (`lib/store.ts`) |
-| Авторизация | проверка подписи Telegram `initData` (HMAC-SHA256), как раньше |
+| Пользователи (профиль, баланс, заработок, число заданий) | таблица `users`, `telegram_id` уникален |
+| Заявки на вступление в каналы | таблица `channel_requests`, `UNIQUE(telegram_id, channel_id)` |
+| Выполненные задания | таблица `task_completions`, `UNIQUE(telegram_id, task_id)` |
+| История виртуальных операций | таблица `transactions` |
+| Сессия Mini App | подписанная httpOnly-cookie (`voxy_state`) только с telegram id |
+| Задания (тексты и награды) | `lib/demo-data.ts` — по-прежнему в коде |
 
-Внешней БД нет — значит нет и «настоящего» постоянного хранилища. Подробности и
-ограничения: раздел **[Как хранится состояние](#как-хранится-состояние)**.
+Подключение создаётся лениво при первом запросе, поэтому `next build` не обращается
+к базе (проверено: сборка проходит с недоступным `DATABASE_URL`).
+
+### Схема
+
+`scripts/init-db.sql` создаёт таблицы через `CREATE TABLE IF NOT EXISTS` (скрипт можно
+запускать повторно). `scripts/init-db.mjs` применяет схему и наполняет демонстрационный
+рейтинг (120 участников с флагом `is_demo = TRUE`), чтобы интерфейс не был пустым —
+реальные пользователи Telegram попадают в те же таблицы без этого флага.
+
+## Быстрый старт
+
+```bash
+npm install          # без postinstall и без prisma
+cp .env.example .env # укажите DATABASE_URL, TELEGRAM_BOT_TOKEN, AUTH_SECRET, NEXT_PUBLIC_APP_URL
+npm run db:init      # создаёт таблицы и демо-заполнение (идемпотентно)
+npm run dev
+```
+
+### Переменные окружения (`.env`)
+
+| Переменная | Назначение |
+| --- | --- |
+| `DATABASE_URL` | строка подключения PostgreSQL (Neon — pooled-строка). Читается только сервером (`lib/db.ts`) и не логируется |
+| `TELEGRAM_BOT_TOKEN` | токен бота из @BotFather: проверка `initData`, ответ на `/start`. **Только сервер** |
+| `AUTH_SECRET` | подпись httpOnly-сессии с telegram id (`openssl rand -hex 32`) |
+| `NEXT_PUBLIC_APP_URL` | публичный HTTPS-адрес Mini App (тот же, что в BotFather) — URL кнопки «Открыть» |
+
+Секретов с префиксом `NEXT_PUBLIC_` быть не должно: такие переменные попадают в клиентский бандл.
+`DATABASE_URL` в клиентском коде не используется.
+
 
 ## Что внутри
 
@@ -35,71 +66,36 @@
 
 - Next.js 16 (App Router) + React 19 + TypeScript
 - Tailwind CSS 4 (дизайн-токены в `app/globals.css` через CSS variables)
-- Zod (валидация), lucide-react (иконки), Telegram WebApp API
-- Без ORM и без драйверов БД: только Node.js `crypto` для HMAC-подписи
+- PostgreSQL через пакет `pg` (без ORM), Zod (валидация), lucide-react (иконки), Telegram WebApp API
 
-## Быстрый старт
+## Что внутри
 
-```bash
-npm install        # без postinstall-шагов и без prisma generate
-cp .env.example .env
-npm run dev        # http://localhost:3000
-```
+## Сессия Mini App
 
-В `.env` достаточно двух переменных (см. ниже). Никаких `docker run` с Postgres,
-никаких миграций и seed-скриптов — демо-данные лежат в репозитории.
+`lib/session.ts` (помечен `import "server-only"`) держит в подписанной httpOnly-cookie
+**`voxy_state`** только telegram id:
 
-### Переменные окружения (`.env`)
-
-| Переменная | Обязательна | Назначение |
-| --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | в production — да | токен бота из @BotFather: проверка `initData`, проверка подписок и ответ на `/start`. **Только сервер** |
-| `NEXT_PUBLIC_APP_URL` | в production — да | публичный HTTPS-адрес Mini App (тот же, что в BotFather) — URL кнопки «Открыть» в боте |
-| `AUTH_SECRET` | в production — да | подпись httpOnly-cookie с состоянием пользователя (`openssl rand -hex 32`) |
-
-`DATABASE_URL` проекту **не нужен**: он нигде не читается (проверяется grep-ом по
-репозиторию). Секретов с префиксом `NEXT_PUBLIC_` в проекте нет и быть не должно:
-такие переменные попадают в клиентский бандл.
-
-## Как хранится состояние
-
-`lib/store.ts` (помечен `import "server-only"`) держит состояние пользователя в
-подписанной httpOnly-cookie **`voxy_state`**:
-
-- содержимое: telegram id, имя/username/аватар, баланс, всего заработано,
-  количество выполненных заданий, последние submissions (до 10) и последние
-  операции (до 20);
-- подпись: HMAC-SHA256 от `AUTH_SECRET`, проверяется на каждом запросе через
-  `crypto.timingSafeEqual` — подделать баланс, награду или текст ответа нельзя;
-- `httpOnly`, `sameSite=lax`, `secure` в production, TTL 30 дней.
-
-**Честные ограничения этой схемы (это не база данных):**
-
-- состояние живёт в браузере конкретного пользователя и **не синхронизируется**
-  между устройствами и Telegram Desktop/Web одновременно;
-- очистка cookies = сброс прогресса пользователя;
-- демо-профили рейтинга и статистика не хранятся, а пересчитываются (см. ниже);
-- «увидеть данные всех пользователей» в этой схеме невозможно by design.
-
-Для игровой/тренировочной демонстрации этого достаточно. Если однажды понадобится
-настоящее мультипользовательское хранилище, менять придётся только реализацию
-`lib/store.ts` (все роуты работают с его функциями, а не с БД напрямую).
+- подпись HMAC-SHA256 от `AUTH_SECRET`, проверка через `crypto.timingSafeEqual`;
+- `httpOnly`, `sameSite=none` + `secure` в production (Mini App может открываться в
+  iframe Telegram Web/Desktop), `lax` локально, TTL 30 дней;
+- баланс, заявки, выполненные задания и операции в cookie **не хранятся** — они в PostgreSQL.
 
 ## Деплой на Vercel
 
-1. Импортируйте репозиторий в Vercel. **Build Command менять не нужно** — Vercel
-   использует стандартный `next build` (в `package.json` нет ни `postinstall`,
-   ни `vercel-build`, ни `prisma generate`).
-2. В **Settings → Environment Variables** задайте для Production и Preview:
-   `TELEGRAM_BOT_TOKEN`, `AUTH_SECRET`. Больше ничего не требуется — `DATABASE_URL`
-   не нужен.
-3. Deploy. После деплоя укажите URL приложения в BotFather (`/newapp`) и откройте Mini App.
+1. Создайте базу в Neon и скопируйте pooled-строку подключения.
+2. Примените схему один раз (локально, указав эту строку):
+   `DATABASE_URL="<строка Neon>" npm run db:init`
+3. Импортируйте репозиторий в Vercel. **Build Command менять не нужно** — стандартный
+   `next build`; обращений к базе во время сборки нет (пул создаётся лениво, в runtime).
+4. В **Settings → Environment Variables** задайте для Production и Preview:
+   `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `AUTH_SECRET`, `NEXT_PUBLIC_APP_URL`.
+5. Deploy. После деплоя укажите URL приложения в BotFather (`/newapp`) и откройте Mini App.
 
-Проверка локально, что production-сборка не зависит от БД:
+Проверки локально:
 
 ```bash
-DATABASE_URL="" npm run build     # проходит: переменная не читается
-DATABASE_URL="" npm run start     # приложение стартует и работает
+npm run db:init                       # схема + демо-заполнение (идемпотентно)
+npm run build                         # сборка не обращается к базе
 npm run typecheck && npm run lint
 ```
 
@@ -108,17 +104,18 @@ npm run typecheck && npm run lint
 1. Создайте бота у [@BotFather](https://t.me/BotFather), положите токен в `TELEGRAM_BOT_TOKEN`.
 2. `/newapp` → укажите URL приложения (или локальный туннель, например ngrok).
 3. Откройте Mini App из бота — `TelegramProvider` получит `initData`, отправит его в
-   `POST /api/auth/telegram`, сервер проверит HMAC-подпись и запишет подписанное
-   состояние в cookie.
+   `POST /api/auth/telegram`, сервер проверит HMAC-подпись, создаст или обновит
+   пользователя в PostgreSQL и поставит подписанную сессию.
 
 Секрет `TELEGRAM_BOT_TOKEN` живёт только в `process.env` (`lib/env.ts`) и никогда
 не попадает ни в JSON, ни в код, ни в git, ни в клиентский бандл.
 
 ### Режим локальной разработки
 
-Вне Telegram (`NODE_ENV !== "production"`) приложение работает на демо-пользователе:
-**Игорь Рябов, @demo_user, 360 ₽** виртуального баланса. В `production` демо-режим
-полностью отключён — запросы без валидного `initData` получают `401`.
+Вне Telegram (`NODE_ENV !== "production"`) приложение входит демо-пользователем из базы
+(**Игорь Рябов, @demo_user**, `telegram_id = 999000001`, флаг `is_demo = TRUE`, стартовый
+баланс 360 ₽ из `db:init`). В `production` демо-режим полностью отключён — запросы без
+валидного `initData` получают `401`.
 
 ## Telegram-бот: `/start` и кнопка «Открыть»
 
@@ -138,7 +135,14 @@ Telegram → POST /api/telegram/webhook → sendMessage → кнопка «От�
 Поведение:
 
 - `/start`, `/start <payload>`, `/start@botname`, `/start@botname <payload>` — во всех
-  случаях бот отправляет одно и то же приветствие с одной inline-кнопкой «Открыть»;
+  случаях бот отправляет **одно** сообщение методом `sendPhoto`: баннер
+  `<NEXT_PUBLIC_APP_URL>/telegram-start-banner.png` + текст приветствия в `caption`
+  + inline-кнопка «Открыть» с URL Mini App из `NEXT_PUBLIC_APP_URL`
+  (картинка не отправляется отдельным сообщением);
+- `NEXT_PUBLIC_APP_URL` должен быть абсолютным HTTPS-адресом, иначе `/start` отвечает
+  `500 APP_URL_INVALID` (localhost/http не пройдут);
+- файл баннера: **`public/telegram-start-banner.png`** (добавьте картинку в репозиторий —
+  Telegram скачивает её по публичному URL);
 - ответ уходит ровно в `message.chat.id` (telegram user id для этого не используется);
 - любые другие сообщения/update игнорируются с ответом `200 { "ok": true, "ignored": true }` —
   endpoint не падает на незнакомых типах update и на битом JSON;
@@ -193,95 +197,69 @@ Telegram Update на `/api/telegram/webhook` — так проверяется �
 
 | Метод | Endpoint | Назначение |
 | --- | --- | --- |
-| POST | `/api/auth/telegram` | валидация `initData` (HMAC-SHA256), запись подписанного состояния в cookie |
-| GET | `/api/tasks` | задания + прогресс «выполнено из N»; для `TELEGRAM_SUBSCRIPTION` — публичные данные каналов |
-| GET | `/api/tasks/[id]` | задание, варианты ответов, submission пользователя, каналы |
-| POST | `/api/submissions` | выполнение задания; для `TELEGRAM_SUBSCRIPTION` сначала серверная проверка подписок |
-| GET | `/api/profile` | профиль и статистика (место в рейтинге, выполнено сегодня) |
+| POST | `/api/auth/telegram` | валидация `initData` (HMAC-SHA256), создание/обновление пользователя в PostgreSQL, подписанная сессия |
+| GET | `/api/tasks` | задания + прогресс; для `TELEGRAM_SUBSCRIPTION` — каналы и статусы заявок, остальные задания `locked` до 3/3 |
+| GET | `/api/tasks/[id]` | задание, варианты ответов, результат пользователя, каналы |
+| POST | `/api/submissions` | выполнение задания одной транзакцией PostgreSQL (`task_completions` + `transactions` + баланс) |
+| GET | `/api/channel-requests` | статус заявок из `channel_requests` (кнопка «Проверить заявки») |
+| GET | `/api/profile` | профиль и статистика из базы (место в рейтинге, выполнено сегодня) |
 | GET | `/api/transactions` | история виртуальных операций пользователя (пагинация) |
-| GET | `/api/leaderboard` | ТОП-30 по `totalEarned DESC` + отдельный блок текущего пользователя |
-| GET | `/api/stats` | участники, минимальная награда, выплаченные бонусы |
-| POST | `/api/telegram/webhook` | Telegram Update от Bot API: `/start` → приветствие с кнопкой «Открыть» (GET → 405) |
+| GET | `/api/leaderboard` | ТОП-30 по `total_earned DESC` + блок текущего пользователя |
+| GET | `/api/stats` | участники и выплаченные бонусы по таблице `users` |
+| POST | `/api/telegram/webhook` | Telegram Update: `chat_join_request` → запись в `channel_requests`; `/start` → приветствие с кнопкой «Открыть» |
 
 Админ-API (`/api/admin/*`) в MVP удалён вместе с БД: задания задаются в коде,
 администрировать в статическом демо нечего.
 
 ## Задание «Подписка на Telegram-каналы»
 
-Тип задания: `TELEGRAM_SUBSCRIPTION` (первое задание на главном экране, +330 ₽).
-Единственное задание с настоящей серверной проверкой — остальные принимаются сразу.
+Тип задания: `TELEGRAM_SUBSCRIPTION` — обязательное первое задание (+330 ₽).
+Пока Telegram не пришлёт заявки по всем трём каналам, остальные задания закрыты.
 
-**Где вставлять реальные каналы:** `config/telegram-channels.ts` — единственное место.
-Для каждого канала заполните `url` (обычная или инвайт-ссылка) и `chatId`
-(публичный `@username` или числовой id вида `-1001234567890`):
-
-```ts
-export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
-  { id: "channel_1", title: "Название канала", url: "https://t.me/...", chatId: "@channel_username" },
-  // ...
-];
-```
+**Где менять каналы:** `config/telegram-channels.ts` — единственное место.
+У каждого канала есть `index` (1…3), `title`, `description`, постоянная invite-ссылка
+`url` и необязательный `chatId` (второй признак для сопоставления заявки).
 
 Как это работает:
 
-- клиент открывает ссылки через `Telegram.WebApp.openTelegramLink()` и НЕ решает,
-  подписан ли пользователь: подключение подтверждает только сервер;
-- `POST /api/submissions` для этого задания вызывает Telegram Bot API `getChatMember`
-  (`lib/telegram-channels.ts`) и отклоняет запрос, если подписки нет
-  (`409 CHANNELS_NOT_SUBSCRIBED`, в `details` — статус по каждому каналу);
-- пока `chatId` не заполнены, роут отвечает `503 CHANNELS_NOT_CONFIGURED`
-  и выплата не начисляется;
-- бот должен быть **администратором** каждого канала (достаточно статуса администратора;
-  отдельные права публикации не нужны). Telegram гарантирует корректную работу
-  `getChatMember` для других пользователей только если бот — администратор канала.
-  Если канал с заявками на вступление, учитывайте, что до одобрения заявки
-  пользователь ещё не считается участником.
+- кнопка «Подписаться» открывает invite-ссылку через `Telegram.WebApp.openTelegramLink()`
+  и **сама по себе ничего не засчитывает**;
+- бот-администратор получает `chat_join_request` → webhook определяет канал по
+  `invite_link.invite_link` и пишет строку в `channel_requests`
+  (`INSERT ... ON CONFLICT (telegram_id, channel_id) DO NOTHING`);
+- в задании есть кнопка **«Проверить заявки»**: она запрашивает `GET /api/channel-requests`,
+  который читает `channel_requests` из PostgreSQL и возвращает счётчик `N/3` и статусы
+  «Ожидаем заявку» / «Запрос отправлен»;
+- при `3/3` задание можно завершить (начисление +330 ₽), остальные задания открываются;
+- `getChatMember` не используется, отдельные invite-ссылки для пользователей не создаются.
 
-## Ежедневная динамика рейтинга
+## Рейтинг и статистика
 
-Демо-участники не хранятся, а **выводятся из текущей даты** (`lib/demo-data.ts`,
-`getLeaderboardBots()`), поэтому:
+Оба экрана считаются по таблице `users`:
 
-- 16 заметных участников заданы фиксированными числами, остальные 94 — из стартового
-  сида (детерминированный LCG, одинаков при каждом запуске);
-- за каждый прошедший день 10–25% участников получают прибавку **+500…1000 ₽**,
-  добавляется **2–4** новых участника (часть — в нижний диапазон, чтобы позиция
-  реального пользователя продолжала немного двигаться);
-- расчёт повторяется на каждом запросе и **ничего не записывает** — поэтому повторные
-  запросы в тот же день дают одинаковые числа, а на следующий день список меняется;
-- значения одинаковы для всех пользователей (дата одна и та же).
+- `GET /api/leaderboard` — `ORDER BY total_earned DESC` (ТОП-30), текущий пользователь
+  определяется по `telegram_id` из сессии и показывается отдельным блоком «Ваше место»;
+- `GET /api/stats` — `participantsCount` = число строк в `users`,
+  `totalBonuses` = `SUM(total_earned)`, `minimumReward` — минимальная награда среди заданий.
 
-Реальные пользователи ежедневных прибавок не получают: их заработок растёт только от
-выполненных заданий, а позиция (`rank`) считается по фактическому `totalEarned` в
-подписанной cookie.
-
-Ответ рейтинга: `entries` — всегда ТОП-30, `total` — всего участников,
-`currentUser` — отдельный блок «Ваше место» (показывается, даже если пользователь
-не попал в ТОП-30; тогда `isInTop: false`).
-
-## Ежедневная статистика главного экрана
-
-`GET /api/stats` возвращает `{ participantsCount, minimumReward, totalBonuses }`.
-Значения тоже выводятся из даты (без БД):
-
-| Поле | Значение |
-| --- | --- |
-| `participantsCount` | 25 сентября 2026 (день запуска MVP) — ровно `2344`, далее `+` целое `20…50` за день |
-| `totalBonuses` | в день запуска — ровно `2 235 890`, далее `+` целое `15 000…25 000` за день |
-| `minimumReward` | минимальная награда среди доступных заданий (сейчас `330`) |
+Демонстрационное заполнение рейтинга (120 участников) лежит в той же таблице с флагом
+`is_demo = TRUE` и не подмешивается ниоткуда больше: реальные пользователи Telegram
+хранятся рядом без этого флага.
 
 `formatBonusAmount()` в `lib/utils.ts` печатает сумму с точками-разделителями:
-`2235890 → "+2.235.890 руб"`.
+`2323432 → "+2.323.432 руб"`.
 
 ## Безопасность
 
-- Telegram id и состояние пользователя никогда не принимаются с фронтенда: они
-  берутся из подписанной cookie (подпись проверяется через `timingSafeEqual`).
+- Telegram id никогда не принимается с фронтенда: он берётся из подписанной сессии
+  (подпись проверяется через `timingSafeEqual`), а данные — из PostgreSQL по этому id.
 - `reward` всегда берётся из определения задания (`lib/demo-data.ts`), а не из тела запроса.
-- Проверки перед выполнением: задание `ACTIVE`, дедлайн не прошёл, длина текста ≥ `minLength`,
-  оценка при `requiresRating`, вариант ответа принадлежит заданию, повторное
-  выполнение того же задания отклоняется (`409 TASK_ALREADY_COMPLETED`).
-- Подписки на Telegram-каналы проверяет только сервер (`getChatMember`).
+- Начисление идёт одной транзакцией PostgreSQL: `INSERT task_completions ... ON CONFLICT DO NOTHING`
+  + `transactions` + обновление `balance/total_earned/completed_tasks`; повторить задание нельзя.
+- Заявки на каналы учитываются только из `chat_join_request` от Telegram (факт нажатия
+  кнопки или открытия ссылки не засчитывается); `getChatMember` не используется.
+- Запросы идут только параметризованными (`$1`, `$2`), `DATABASE_URL` живёт в
+  `process.env` внутри `server-only` модуля и не попадает ни в логи, ни в клиентский бандл.
 - Ответы API не содержат stack trace; `alert()` нигде не используется.
 - Реальных денежных операций нет: все суммы виртуальные.
 
@@ -290,12 +268,13 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
 ```
 app/            страницы (/tasks, /tasks/[id], /top, /profile) и API-роуты
 components/     layout, tasks, profile, leaderboard, transactions, telegram, theme, ui
-lib/            auth.ts + store.ts (cookie-состояние), demo-data.ts (задания и демо-рейтинг),
-                tasks.ts, telegram.ts (WebApp API), telegram-bot.ts (Bot API: /start),
-                telegram-channels.ts, env.ts, http.ts, utils.ts,
-                validation.ts, types.ts, hooks.ts, dates.ts, mock-users.ts, theme-script.ts
-config/         branding.ts (название, описание, логотип, акцентный цвет #6C5CE7),
-                telegram-channels.ts (реальные каналы для задания-подписки)
+lib/            db.ts (пул pg + все SQL-запросы), session.ts (подписанная cookie),
+                auth.ts (initData, вход, текущий пользователь), tasks.ts (состояния заданий),
+                demo-data.ts (тексты заданий), telegram.ts (WebApp API), env.ts, http.ts,
+                utils.ts, validation.ts, types.ts, hooks.ts, theme-script.ts
+config/         branding.ts (название, описание, иконка, акцентный цвет #6C5CE7),
+                telegram-channels.ts (каналы задания-подписки)
+scripts/        init-db.sql + init-db.mjs (схема и демо-заполнение, npm run db:init)
 ```
 
 Все цвета и радиусы вынесены в CSS-переменные в `app/globals.css`

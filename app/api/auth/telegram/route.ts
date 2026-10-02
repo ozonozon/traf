@@ -32,22 +32,20 @@ export async function POST(request: NextRequest) {
 
     const botToken = getTelegramBotToken();
     const { initData } = parsed.data;
-    // Состояние предыдущего визита: профиль обновляем, заработанное сохраняем.
-    const current = await getCurrentUser();
 
-    // 1. Валидный Telegram initData.
+    // 1. Валидный Telegram initData: пользователь создаётся/обновляется в PostgreSQL.
     if (initData && botToken) {
       const verification = validateTelegramInitData(initData, botToken);
       if (!verification.valid || !verification.user) {
         throw new RouteError("INVALID_INIT_DATA", "Не удалось проверить данные Telegram", 401);
       }
-      const user = await signInWithTelegram(current, verification.user);
+      const user = await signInWithTelegram(verification.user);
       return jsonOk({ user: toPublicUser(user), mode: "telegram" });
     }
 
     // 2. Локальная разработка вне Telegram (в production выключено).
     if (isDemoAllowed()) {
-      const user = await signInAsDemo(current);
+      const user = await signInAsDemo();
       return jsonOk({ user: toPublicUser(user), mode: "demo" });
     }
 
@@ -67,7 +65,7 @@ export async function GET() {
     if (!user) {
       throw new RouteError("UNAUTHORIZED", "Нужно открыть приложение внутри Telegram", 401);
     }
-    return jsonOk({ user: toPublicUser(user), mode: user.isDemo ? "demo" : "telegram" });
+    return jsonOk({ user: toPublicUser(user), mode: user.is_demo ? "demo" : "telegram" });
   } catch (error) {
     return handleRouteError(error);
   }

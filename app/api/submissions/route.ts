@@ -1,28 +1,23 @@
 import type { NextRequest } from "next/server";
 
-import { TELEGRAM_CHANNELS } from "@/config/telegram-channels";
 import { toPublicUser } from "@/lib/auth";
+import { completeTask, getRequestedChannelIds, getTaskCompletion, type UserRow } from "@/lib/db";
 import { findDemoTask, resolveDeadline } from "@/lib/demo-data";
 import { RouteError, handleRouteError, jsonOk, requireUser } from "@/lib/http";
-import { applySubmission, findSubmission, saveUserState } from "@/lib/store";
-import { TELEGRAM_SUBSCRIPTION_TASK_TYPE, isSubscriptionComplete, serializeSubmission } from "@/lib/tasks";
+import { TELEGRAM_SUBSCRIPTION_TASK_TYPE, isSubscriptionComplete, serializeCompletion } from "@/lib/tasks";
 import { formatZodIssues, submissionSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/submissions
+ * POST /api/submissions — выполнение задания.
  *
- * Выполнение задания.
- *  - пользователь определяется только из подписанной cookie-сессии;
- *  - reward берётся только из определения задания (lib/demo-data.ts);
- *  - для задания TELEGRAM_SUBSCRIPTION подписки через getChatMember не проверяются:
- *    учитывается факт chat_join_request от Telegram (channel1Requested…channel3Requested
- *    в подписанном состоянии). Пока все три заявки не получены, задание не завершить,
- *    а остальные задания заблокированы;
- *  - submission, операция и баланс обновляются одним действием: состояние
- *    пересчитывается на сервере и заново подписывается (см. lib/store.ts).
+ * Пользователь определяется только из подписанной сессии, награда — только из описания
+ * задания. Проверки: задание активно, дедлайн не прошёл, поля валидны, заявки на каналы
+ * (для обязательного задания) получены Telegram, остальные задания разблокированы.
+ * Начисление выполняется одной транзакцией PostgreSQL: task_completions + transactions
+ * + balance/total_earned/completed_tasks. Повторно начислить задание нельзя.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -35,18 +30,25 @@ export async function POST(request: NextRequest) {
     }
 
     const { taskId, rating, selectedOptionId } = parsed.data;
-    let answer = parsed.data.answer.trim();
+    const answer = parsed.data.answer.trim();
 
     const task = findDemoTask(taskId);
     if (!task) {
       throw new RouteError("TASK_NOT_FOUND", "Задание не найдено", 404);
     }
 
-    const isSubscriptionTask = task.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE;
-    const subscriptionDone = isSubscriptionComplete(user);
+    if (task.status !== "ACTIVE") {
+      throw new RouteError("TASK_NOT_ACTIVE", "Задание больше не доступно", 409);
+    }
+    if (resolveDeadline().getTime() < Date.now()) {
+      throw new RouteError("TASK_EXPIRED", "Срок выполнения задания истёк", 409);
+    }
 
-    // Обязательное задание: пока Telegram не прислал заявки по всем трём каналам,
-    // задание нельзя завершить (нажатие «Подписаться» заявку не создаёт).
+    const isSubscriptionTask = task.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE;
+    const requestedChannelIds = await getRequestedChannelIds(user.telegram_id);
+    const subscriptionDone = isSubscriptionComplete(requestedChannelIds);
+
+    // Обязательное задание: заявки должны прийти от Telegram (не от нажатия кнопки).
     if (isSubscriptionTask && !subscriptionDone) {
       throw new RouteError(
         "JOIN_REQUESTS_INCOMPLETE",
@@ -64,18 +66,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (isSubscriptionTask) {
-      // Отметка о заявках, подтверждённых Telegram (состояние уже проверено выше).
-      answer = `Заявки подтверждены Telegram: ${TELEGRAM_CHANNELS.map((channel) => channel.title).join(", ")}`;
-    }
-
-    if (task.status !== "ACTIVE") {
-      throw new RouteError("TASK_NOT_ACTIVE", "Задание больше не доступно", 409);
-    }
-    if (resolveDeadline().getTime() < Date.now()) {
-      throw new RouteError("TASK_EXPIRED", "Срок выполнения задания истёк", 409);
-    }
-
     if (!isSubscriptionTask) {
       if (answer.length < task.minLength) {
         throw new RouteError("TEXT_TOO_SHORT", `Ответ должен быть не короче ${task.minLength} символов`, 422);
@@ -88,30 +78,30 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (findSubmission(user, task.id)) {
+    const existing = await getTaskCompletion(user.telegram_id, task.id);
+    if (existing) {
       throw new RouteError("TASK_ALREADY_COMPLETED", "Вы уже выполняли это задание", 409);
     }
 
-    // Награда берётся только из определения задания; состояние подписывается на сервере.
-    const { state, submission } = applySubmission(user, {
+    const result = await completeTask({
+      telegramId: user.telegram_id,
       taskId: task.id,
-      taskTitle: task.title,
       reward: task.reward,
-      answer,
-      rating: isSubscriptionTask ? null : (rating ?? null),
-      selectedOptionId: isSubscriptionTask ? null : (selectedOptionId ?? null),
+      description: `Выполнение задания «${task.title}»`,
     });
-    await saveUserState(state);
+
+    if (!result.created || !result.user) {
+      throw new RouteError("TASK_ALREADY_COMPLETED", "Вы уже выполняли это задание", 409);
+    }
 
     return jsonOk(
       {
-        submission: serializeSubmission(submission),
-        user: toPublicUser(state),
+        submission: serializeCompletion({ reward: task.reward, completed_at: new Date() }),
+        user: toPublicUser(result.user as UserRow),
         reward: task.reward,
       },
       201,
     );
-
   } catch (error) {
     return handleRouteError(error);
   }

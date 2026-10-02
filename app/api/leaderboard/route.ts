@@ -1,5 +1,5 @@
 import { getCurrentUser } from "@/lib/auth";
-import { getLeaderboardBots } from "@/lib/demo-data";
+import { getLeaderboard, getUserRank } from "@/lib/db";
 import { handleRouteError, jsonOk } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -8,83 +8,49 @@ export const dynamic = "force-dynamic";
 /** Размер ТОП-списка. */
 const LEADERBOARD_TOP_LIMIT = 30;
 
-interface LeaderboardRow {
-  id: string;
-  firstName: string;
-  lastName: string | null;
-  username: string | null;
-  photoUrl: string | null;
-  totalEarned: number;
-  completedTasks: number;
-  isCurrentUser: boolean;
-}
-
 /**
  * GET /api/leaderboard
  *
- * Демонстрационные участники формируются детерминированно из текущей даты
- * (см. lib/demo-data.ts): значения одинаковы для всех пользователей и не меняются
- * в течение дня, а каждый следующий день часть участников получает прибавку.
- * Повторные запросы ничего не «накручивают»: список пересчитывается, а не хранится.
- *
- * Ответ: ТОП-30 по totalEarned DESC + отдельный блок текущего пользователя,
- * который не обязан входить в ТОП-30.
+ * Рейтинг считается по таблице users (ORDER BY total_earned DESC) — реальные данные
+ * из PostgreSQL. Демо-заполнение интерфейса лежит в той же таблице с флагом is_demo
+ * и не подмешивается ниоткуда больше. Текущий пользователь определяется по telegram_id
+ * из сессии и дополнительно показывается отдельным блоком.
  */
 export async function GET() {
   try {
-    const currentUser = await getCurrentUser();
+    const [currentUser, board] = await Promise.all([getCurrentUser(), getLeaderboard(LEADERBOARD_TOP_LIMIT)]);
 
-    const rows: LeaderboardRow[] = getLeaderboardBots().map((bot) => ({
-      id: bot.id,
-      firstName: bot.firstName,
-      lastName: bot.lastName,
-      username: bot.username,
-      photoUrl: null,
-      totalEarned: bot.totalEarned,
-      completedTasks: bot.completedTasks,
-      isCurrentUser: false,
+    const entries = board.entries.map((row, index) => ({
+      rank: index + 1,
+      id: `tg-${row.telegram_id}`,
+      firstName: row.first_name ?? "Пользователь",
+      lastName: row.last_name,
+      username: row.username,
+      photoUrl: row.photo_url,
+      totalEarned: Number(row.total_earned),
+      completedTasks: Number(row.completed_tasks),
+      isCurrentUser: currentUser?.telegram_id === row.telegram_id,
     }));
 
-    if (currentUser) {
-      rows.push({
-        id: `self-${currentUser.telegramId}`,
-        firstName: currentUser.firstName,
-        lastName: currentUser.lastName,
-        username: currentUser.username,
-        photoUrl: currentUser.photoUrl,
-        totalEarned: currentUser.totalEarned,
-        completedTasks: currentUser.completedTasks,
-        isCurrentUser: true,
-      });
-    }
-
-    // По убыванию заработка; при равенстве демо-участники выше реального пользователя
-    // (как раньше: демо-профили создавались раньше и сортировались по createdAt asc).
-    rows.sort(
-      (left, right) =>
-        right.totalEarned - left.totalEarned || Number(left.isCurrentUser) - Number(right.isCurrentUser),
-    );
-
-    const entries = rows.slice(0, LEADERBOARD_TOP_LIMIT).map((row, index) => ({ rank: index + 1, ...row }));
-    const selfIndex = rows.findIndex((row) => row.isCurrentUser);
-
-    const currentUserEntry =
-      currentUser && selfIndex >= 0
-        ? {
-            rank: selfIndex + 1,
-            firstName: currentUser.firstName,
-            lastName: currentUser.lastName,
+    const currentUserEntry = currentUser
+      ? await (async () => {
+          const { rank } = await getUserRank(currentUser.telegram_id);
+          return {
+            rank,
+            firstName: currentUser.first_name ?? "Пользователь",
+            lastName: currentUser.last_name,
             username: currentUser.username,
-            photoUrl: currentUser.photoUrl,
-            totalEarned: currentUser.totalEarned,
-            completedTasks: currentUser.completedTasks,
-            isInTop: selfIndex + 1 <= LEADERBOARD_TOP_LIMIT,
-          }
-        : null;
+            photoUrl: currentUser.photo_url,
+            totalEarned: Number(currentUser.total_earned),
+            completedTasks: Number(currentUser.completed_tasks),
+            isInTop: rank <= LEADERBOARD_TOP_LIMIT,
+          };
+        })()
+      : null;
 
     return jsonOk({
       entries,
-      total: rows.length,
+      total: board.total,
       topLimit: LEADERBOARD_TOP_LIMIT,
       currentUser: currentUserEntry,
     });
@@ -92,4 +58,3 @@ export async function GET() {
     return handleRouteError(error);
   }
 }
-

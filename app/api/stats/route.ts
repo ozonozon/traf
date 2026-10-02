@@ -1,28 +1,24 @@
-import { getDailyAppStats, minimumReward } from "@/lib/demo-data";
+import { getPlatformStats } from "@/lib/db";
+import { minimumReward } from "@/lib/demo-data";
 import { handleRouteError, jsonOk } from "@/lib/http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/stats — демонстрационная статистика платформы.
- *
- * Значения выводятся детерминированно из текущей даты (см. lib/demo-data.ts):
- * в день запуска MVP это стартовые 2344 участника и 2 235 890 бонусов, дальше
- * каждый день прибавляется 20–50 участников и 15 000–25 000 бонусов.
- * Поэтому числа одинаковы для всех пользователей и не меняются при обновлении страницы.
+ * GET /api/stats — статистика платформы по реальным данным PostgreSQL:
+ * число участников (users) и сумма выплаченных виртуальных бонусов (total_earned).
  */
 export async function GET() {
   try {
-    const stats = getDailyAppStats();
+    const { participants, totalBonuses } = await getPlatformStats();
 
     return jsonOk({
-      participantsCount: stats.participantsCount,
+      participantsCount: participants,
       minimumReward: minimumReward(),
-      totalBonuses: stats.totalBonuses,
+      totalBonuses,
     });
   } catch (error) {
     return handleRouteError(error);
   }
 }
-

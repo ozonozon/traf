@@ -3,7 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "./auth";
-import type { UserState } from "./store";
+import type { UserRow } from "./db";
 
 export interface IssuePayload {
   path: string;
@@ -61,10 +61,10 @@ export function handleRouteError(error: unknown): NextResponse {
 }
 
 /**
- * Состояние пользователя из подписанной cookie или 401.
+ * Пользователь из подписанной сессии или 401.
  * Telegram id и userId с фронтенда никогда не принимаются как доверенные.
  */
-export async function requireUser(): Promise<UserState> {
+export async function requireUser(): Promise<UserRow> {
   const user = await getCurrentUser();
   if (!user) {
     throw new RouteError("UNAUTHORIZED", "Нужно открыть приложение внутри Telegram", 401);

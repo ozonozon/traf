@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { findChannelByInvite } from "@/config/telegram-channels";
-import { createJoinTicket } from "@/lib/join-ticket";
+import { branding } from "@/config/branding";
+import { addChannelRequest } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,60 +60,50 @@ async function callBotApi(
 /**
  * Заявка на вступление в закрытый канал (chat_join_request).
  *
- * Заявку невозможно подделать со стороны клиента: update приходит от Telegram.
- * Определяем канал по invite-ссылке из заявки (постоянные ссылки из конфига), затем
- * отправляем пользователю кнопку с подписанным тикетом. Тикет применяется в приложении
- * и выставляет channelNRequested = true в подписанном состоянии (cookie).
+ * Заявку нельзя подделать со стороны клиента: update приходит от Telegram.
+ * Канал определяется по invite-ссылке из заявки (постоянные ссылки из конфига),
+ * затем заявка записывается в таблицу channel_requests:
+ *   INSERT ... ON CONFLICT (telegram_id, channel_id) DO NOTHING
+ * Никаких cookie и тикетов для хранения заявки не используется.
  * Подписки через getChatMember не проверяются.
  */
 async function handleJoinRequest(update: TelegramUpdate): Promise<NextResponse> {
   const joinRequest = update.chat_join_request;
   const telegramUserId = joinRequest?.from?.id;
-  const channel = findChannelByInvite(joinRequest?.invite_link?.invite_link, joinRequest?.chat?.id ?? null);
+  const inviteLink = joinRequest?.invite_link?.invite_link ?? null;
+  const channel = findChannelByInvite(inviteLink, joinRequest?.chat?.id ?? null);
 
   if (typeof telegramUserId !== "number" || !channel) {
     // Заявка не по нашим каналам или нет данных — просто игнорируем.
     return NextResponse.json({ ok: true, ignored: true });
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "");
-  if (!appUrl) {
-    console.error("[telegram-webhook] chat_join_request: NEXT_PUBLIC_APP_URL не настроен");
-    return NextResponse.json({ ok: true, joinRequest: { channel: channel.index }, notified: false });
+  try {
+    const created = await addChannelRequest({
+      telegramId: String(telegramUserId),
+      channelId: channel.id,
+      inviteLink,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      joinRequest: { channel: channel.index, channelId: channel.id, created },
+    });
+  } catch (error) {
+    // Ошибку базы не раскрываем наружу, в лог уходит только тип.
+    console.error("[telegram-webhook] chat_join_request: не удалось сохранить заявку", error instanceof Error ? error.name : "unknown");
+    return NextResponse.json(
+      { ok: false, delivered: false, error: "DATABASE_ERROR", details: "Не удалось сохранить заявку" },
+      { status: 500 },
+    );
   }
-
-  const ticket = createJoinTicket(telegramUserId, channel.index);
-  const separator = appUrl.includes("?") ? "&" : "?";
-
-  const result = await callBotApi("sendMessage", {
-    chat_id: telegramUserId,
-    text: `Заявка на «${channel.title}» отправлена. Нажмите «Открыть», чтобы засчитать её в приложении.`,
-    reply_markup: {
-      inline_keyboard: [
-        [
-          {
-            text: "Открыть",
-            web_app: { url: `${appUrl}${separator}join=${encodeURIComponent(ticket)}` },
-          },
-        ],
-      ],
-    },
-  });
-
-  if (!result.ok) {
-    // Сообщение-подтверждение не критично: состояние применится при следующей заявке/открытии.
-    console.error(`[telegram-webhook] chat_join_request: sendMessage не удалось — ${result.details ?? "ошибка"}`);
-    return NextResponse.json({ ok: true, joinRequest: { channel: channel.index }, notified: false });
-  }
-
-  return NextResponse.json({ ok: true, joinRequest: { channel: channel.index }, notified: true });
 }
 
 /**
  * POST /api/telegram/webhook — Update от Telegram Bot API.
  *
- * chat_join_request → подтверждение заявки кнопкой с тикетом (см. handleJoinRequest).
- * message /start    → приветствие с кнопкой «Открыть».
+ * chat_join_request → запись заявки в PostgreSQL (см. handleJoinRequest).
+ * message /start    → ОДНО сообщение: баннер (sendPhoto) + текст приветствия + кнопка «Открыть».
  * Всё остальное игнорируется.
  */
 export async function POST(request: Request) {
@@ -123,7 +114,7 @@ export async function POST(request: Request) {
     return handleJoinRequest(update);
   }
 
-  // 2. Команда /start — без изменений.
+  // 2. Команда /start.
   const text = update?.message?.text;
   const chatId = update?.message?.chat?.id;
 
@@ -132,15 +123,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, ignored: true });
   }
 
-  const result = await callBotApi("sendMessage", {
+  // Адрес Mini App и баннера берём из NEXT_PUBLIC_APP_URL: только абсолютный HTTPS.
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().replace(/\/+$/, "");
+  if (!appUrl.startsWith("https://")) {
+    console.error("[telegram-webhook] /start: NEXT_PUBLIC_APP_URL должен быть абсолютным HTTPS-адресом");
+    return NextResponse.json(
+      {
+        ok: false,
+        delivered: false,
+        error: "APP_URL_INVALID",
+        details: "NEXT_PUBLIC_APP_URL должен начинаться с https://",
+      },
+      { status: 500 },
+    );
+  }
+
+  // Одно сообщение: картинка + текст + кнопка (sendPhoto с caption, без отдельной отправки картинки).
+  const result = await callBotApi("sendPhoto", {
     chat_id: chatId,
-    text: START_TEXT,
+    photo: `${appUrl}${branding.startBanner}`,
+    caption: START_TEXT,
     reply_markup: {
       inline_keyboard: [
         [
           {
             text: "Открыть",
-            web_app: { url: process.env.NEXT_PUBLIC_APP_URL },
+            web_app: { url: appUrl },
           },
         ],
       ],

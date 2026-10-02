@@ -2,20 +2,16 @@ import "server-only";
 
 import crypto from "node:crypto";
 
+import { getUserByTelegramId, upsertUser, type UserRow } from "./db";
 import { isProduction } from "./env";
-import {
-  createDemoState,
-  createTelegramState,
-  readUserState,
-  refreshTelegramProfile,
-  saveUserState,
-  type UserState,
-} from "./store";
+import { getSessionTelegramId, setSessionCookie } from "./session";
 import type { TelegramUser } from "./telegram";
-
-export { toPublicUser } from "./store";
+import type { PublicUserDto } from "./types";
 
 const INIT_DATA_MAX_AGE_SECONDS = 60 * 60 * 24;
+
+/** Демо-пользователь локальной разработки (NODE_ENV !== production). */
+export const DEMO_TELEGRAM_ID = "999000001";
 
 /** Демо-режим разрешён только вне production. */
 export function isDemoAllowed(): boolean {
@@ -71,28 +67,59 @@ export function validateTelegramInitData(
   return { valid: true, user, authDate: new Date(authDateSeconds * 1000) };
 }
 
-// --- Сессия (подписанная httpOnly-cookie с состоянием пользователя) ---
+// --- Публичное представление пользователя -----------------------------------
 
-/** Текущее состояние пользователя или null (например, до авторизации). */
-export async function getCurrentUser(): Promise<UserState | null> {
-  return readUserState();
+/** Публичные поля пользователя для интерфейса (внутренние id не уходят). */
+export function toPublicUser(user: UserRow): PublicUserDto {
+  return {
+    username: user.username,
+    firstName: user.first_name ?? "Пользователь",
+    lastName: user.last_name,
+    photoUrl: user.photo_url,
+    balance: Number(user.balance),
+    totalEarned: Number(user.total_earned),
+    completedTasks: Number(user.completed_tasks),
+    isDemo: Boolean(user.is_demo),
+  };
 }
 
-/** Вход по данным Telegram: профиль обновляется, заработанное сохраняется. */
-export async function signInWithTelegram(
-  current: UserState | null,
-  telegramUser: TelegramUser,
-): Promise<UserState> {
-  const next = current ? refreshTelegramProfile(current, telegramUser) : createTelegramState(telegramUser);
-  await saveUserState(next);
-  return next;
+// --- Вход / текущий пользователь ---------------------------------------------
+
+/**
+ * Вход по данным Telegram: пользователь создаётся или обновляется в PostgreSQL
+ * (INSERT ... ON CONFLICT DO UPDATE), затем ставится подписанная сессия.
+ */
+export async function signInWithTelegram(telegramUser: TelegramUser): Promise<UserRow> {
+  const user = await upsertUser({
+    telegramId: String(telegramUser.id),
+    username: telegramUser.username ?? null,
+    firstName: telegramUser.first_name || "Пользователь",
+    lastName: telegramUser.last_name ?? null,
+    photoUrl: telegramUser.photo_url ?? null,
+  });
+
+  await setSessionCookie(user.telegram_id);
+  return user;
 }
 
-/** Вход в демо-режиме (локальная разработка вне Telegram). */
-export async function signInAsDemo(current: UserState | null): Promise<UserState> {
-  const next = current?.isDemo ? current : createDemoState();
-  await saveUserState(next);
-  return next;
+/** Демо-вход локальной разработки: тот же пользователь в базе, но с флагом is_demo. */
+export async function signInAsDemo(): Promise<UserRow> {
+  const user = await upsertUser({
+    telegramId: DEMO_TELEGRAM_ID,
+    username: "demo_user",
+    firstName: "Игорь",
+    lastName: "Рябов",
+    photoUrl: null,
+    isDemo: true,
+  });
+
+  await setSessionCookie(user.telegram_id);
+  return user;
 }
 
-
+/** Текущий пользователь: telegram-id из сессии, данные — из PostgreSQL. */
+export async function getCurrentUser(): Promise<UserRow | null> {
+  const telegramId = await getSessionTelegramId();
+  if (!telegramId) return null;
+  return getUserByTelegramId(telegramId);
+}

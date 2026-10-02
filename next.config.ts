@@ -1,12 +1,12 @@
 import type { NextConfig } from "next";
 
 /**
- * MVP-конфигурация без внешних сервисов.
- *
- * Дополнительных настроек не требуется: нет БД-драйверов, нет внешних серверных
- * пакетов, нет `images.remotePatterns` (аватары Telegram — обычные <img> с внешним URL).
+ * MVP-конфигурация без ORM: доступ к PostgreSQL идёт через `pg` из server-only модуля.
+ * Пакет не бандлится, а подключается как внешний модуль — его нативные части не ломают сборку.
  */
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = {
+  serverExternalPackages: ["pg"],
+};
 
 export default nextConfig;
 

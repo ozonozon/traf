@@ -1,9 +1,9 @@
 import "server-only";
 
-import { publicChannels } from "@/config/telegram-channels";
+import { TELEGRAM_CHANNELS, publicChannels } from "@/config/telegram-channels";
 
 import type { DemoTask } from "./demo-data";
-import { allChannelsRequested, isChannelRequested, type ChannelIndex, type StoredSubmission, type UserState } from "./store";
+import type { TaskCompletionRow } from "./db";
 import { TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "./task-constants";
 import type { SubmissionDto, TaskChannelDto, TaskListItemDto, TaskState } from "./types";
 
@@ -11,13 +11,12 @@ export { TELEGRAM_SUBSCRIPTION_TASK_TYPE };
 
 /**
  * Данные каналов для задачи «Подписка на Telegram-каналы».
- * `requested` берётся ТОЛЬКО из подписанного состояния (cookie): true появляется
- * исключительно после того, как Telegram прислал chat_join_request и подписанный
- * тикет заявки был применён. Ни нажатие кнопки, ни открытие ссылки не влияют.
+ * `requested` приходит из PostgreSQL (таблица channel_requests): true появляется
+ * только после реального chat_join_request от Telegram. Нажатие кнопки не влияет.
  */
 export function subscriptionTaskFields(
   type: string,
-  state: UserState | null,
+  requestedChannelIds: string[],
 ): {
   channels?: TaskChannelDto[];
 } {
@@ -26,14 +25,14 @@ export function subscriptionTaskFields(
   return {
     channels: publicChannels().map((channel) => ({
       ...channel,
-      requested: state ? isChannelRequested(state, channel.index as ChannelIndex) : false,
+      requested: requestedChannelIds.includes(channel.id),
     })),
   };
 }
 
-/** Обязательное задание выполнено (все три заявки получены)? */
-export function isSubscriptionComplete(state: UserState | null): boolean {
-  return allChannelsRequested(state);
+/** Все три заявки получены? */
+export function isSubscriptionComplete(requestedChannelIds: string[]): boolean {
+  return TELEGRAM_CHANNELS.every((channel) => requestedChannelIds.includes(channel.id));
 }
 
 /** Состояние задания для конкретного пользователя. */
@@ -67,13 +66,17 @@ export function serializeTaskSummary(task: DemoTask, deadline: Date, state: Task
   };
 }
 
-export function serializeSubmission(submission: StoredSubmission): SubmissionDto {
+/**
+ * Submission для интерфейса. Ответ и оценка в базе не хранятся (схема task_completions
+ * содержит только задание и награду), поэтому для уже выполненных заданий показываются
+ * награда и дата.
+ */
+export function serializeCompletion(completion: TaskCompletionRow): SubmissionDto {
   return {
-    answer: submission.answer,
-    rating: submission.rating,
-    selectedOptionId: submission.selectedOptionId,
-    reward: submission.reward,
-    createdAt: submission.createdAt,
+    answer: "",
+    rating: null,
+    selectedOptionId: null,
+    reward: Number(completion.reward),
+    createdAt: new Date(completion.completed_at).toISOString(),
   };
 }
-
