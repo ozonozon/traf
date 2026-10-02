@@ -1,5 +1,7 @@
 import "server-only";
 
+import { publicChannels } from "@/config/telegram-channels";
+
 import type { DemoTask } from "./demo-data";
 import type { TaskCompletionRow } from "./db";
 import { TELEGRAM_SUBSCRIPTION_TASK_ID, TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "./task-constants";
@@ -31,6 +33,15 @@ export function subscriptionTaskFields(
       subscribed: channel.subscribed,
     })),
   };
+}
+
+/**
+ * Публичные каналы задания без проверки подписки: нужны, чтобы карточки каналов
+ * отображались всегда — даже если запрос пришёл без авторизации (например, WebView
+ * перезапустился без initData). Секретов здесь нет: chatId остаётся на сервере.
+ */
+export function publicSubscriptionChannels(): ChannelSubscriptionDto[] {
+  return publicChannels().map((channel) => ({ ...channel, subscribed: false }));
 }
 
 /**

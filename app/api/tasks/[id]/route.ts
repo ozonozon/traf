@@ -9,6 +9,7 @@ import {
   TELEGRAM_SUBSCRIPTION_TASK_TYPE,
   computeTaskState,
   isSubscriptionTaskDone,
+  publicSubscriptionChannels,
   serializeCompletion,
   serializeTaskSummary,
   subscriptionTaskFields,
@@ -36,6 +37,8 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
       : [null, []];
 
     // Статусы каналов — из серверной проверки Telegram Bot API getChatMember.
+    // Без авторизации отдаём публичный список каналов (subscribed: false), чтобы
+    // карточки и кнопки «ПОДПИСАТЬСЯ» были видны всегда.
     const subscriptionCheck =
       user && task.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE && !completion
         ? await checkChannelSubscriptions(user.telegram_id).catch(() => null)
@@ -48,7 +51,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     return jsonOk({
       task: {
         ...serializeTaskSummary(task, deadline, state),
-        ...subscriptionTaskFields(task.type, subscriptionCheck?.channels ?? []),
+        ...subscriptionTaskFields(task.type, subscriptionCheck?.channels ?? publicSubscriptionChannels()),
         conditions: task.conditions,
         options: task.options.map((option) => ({ id: option.id, text: option.text })),
         submission: completion ? serializeCompletion(completion) : null,

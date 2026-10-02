@@ -7,6 +7,7 @@ import {
   TELEGRAM_SUBSCRIPTION_TASK_TYPE,
   computeTaskState,
   isSubscriptionTaskDone,
+  publicSubscriptionChannels,
   serializeTaskSummary,
   subscriptionTaskFields,
 } from "@/lib/tasks";
@@ -34,11 +35,12 @@ export async function GET() {
     const deadline = resolveDeadline();
 
     // Живая проверка подписок нужна только пока обязательное задание не выполнено.
+    // Без авторизации отдаём публичный список каналов, чтобы карточки были видны.
     const subscriptionCheck =
       user && !subscriptionDone
         ? await checkChannelSubscriptions(user.telegram_id).catch(() => null)
         : null;
-    const subscriptionChannels = subscriptionCheck?.channels ?? [];
+    const subscriptionChannels = subscriptionCheck?.channels ?? publicSubscriptionChannels();
 
     const items = listDemoTasks().map((task) => {
       const isCompleted = completedIds.includes(task.id);

@@ -23,8 +23,10 @@ import { TaskSuccess } from "./TaskSuccess";
  */
 export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   const toast = useToast();
-  const { setUser, authedFetch } = useSession();
+  const { setUser, authedFetch, status, retry } = useSession();
 
+  // Каналы приходят с сервера из config/telegram-channels.ts (без chatId) —
+  // список отдаётся всегда, даже если запрос ушёл без авторизации.
   const [channels, setChannels] = useState<TaskChannelDto[]>(task.channels ?? []);
   const [isChecking, setIsChecking] = useState(false);
   const [hasChecked, setHasChecked] = useState(false);
@@ -49,6 +51,10 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
 
     setIsChecking(true);
     try {
+      // Если сессия ещё не установлена (например, после возврата из Telegram),
+      // сначала повторяем обычный вход существующим механизмом.
+      if (status !== "ready") retry();
+
       const response = await authedFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions");
       setChannels((current) =>
         current.map((channel) => {
@@ -67,8 +73,13 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
     } catch (cause) {
       hapticNotification("error");
       const code = isApiError(cause) ? cause.code : "REQUEST_FAILED";
+      const isAuthProblem = code === "UNAUTHORIZED" || code === "INVALID_INIT_DATA";
       toast.show("Не удалось проверить подписку", {
-        description: isApiError(cause) ? cause.message : getErrorMessage(code),
+        description: isAuthProblem
+          ? "Сессия Telegram сбросилась. Закройте Mini App и откройте его заново из бота."
+          : isApiError(cause)
+            ? cause.message
+            : getErrorMessage(code),
         variant: "error",
       });
     } finally {
