@@ -1,14 +1,13 @@
 import type { NextRequest } from "next/server";
 
 import {
-  getCurrentUser,
   isDemoAllowed,
   signInAsDemo,
   signInWithTelegram,
   toPublicUser,
   validateTelegramInitData,
 } from "@/lib/auth";
-import { RouteError, handleRouteError, jsonOk } from "@/lib/http";
+import { RouteError, handleRouteError, jsonOk, requireUser } from "@/lib/http";
 import { getTelegramBotToken } from "@/lib/env";
 import { formatZodIssues, telegramAuthSchema } from "@/lib/validation";
 
@@ -61,10 +60,8 @@ export async function POST(request: NextRequest) {
 /** GET /api/auth/telegram — текущая сессия (для проверки авторизации). */
 export async function GET() {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      throw new RouteError("UNAUTHORIZED", "Нужно открыть приложение внутри Telegram", 401);
-    }
+    // Тот же механизм, что и у остальных защищённых роутов: cookie или initData в заголовке.
+    const user = await requireUser();
     return jsonOk({ user: toPublicUser(user), mode: user.is_demo ? "demo" : "telegram" });
   } catch (error) {
     return handleRouteError(error);

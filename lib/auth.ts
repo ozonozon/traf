@@ -3,7 +3,7 @@ import "server-only";
 import crypto from "node:crypto";
 
 import { getUserByTelegramId, upsertUser, type UserRow } from "./db";
-import { isProduction } from "./env";
+import { getTelegramBotToken, isProduction } from "./env";
 import { getSessionTelegramId, setSessionCookie } from "./session";
 import type { TelegramUser } from "./telegram";
 import type { PublicUserDto } from "./types";
@@ -122,4 +122,23 @@ export async function getCurrentUser(): Promise<UserRow | null> {
   const telegramId = await getSessionTelegramId();
   if (!telegramId) return null;
   return getUserByTelegramId(telegramId);
+}
+
+/**
+ * Пользователь по initData, пришедшему заголовком вместо cookie.
+ *
+ * Используется, когда клиент не прислал сессионную cookie (Telegram Web/Desktop
+ * открывает Mini App в iframe, и браузер может не сохранить стороннюю cookie).
+ * Проверка та же самая, что и при входе: HMAC-подпись initData из TELEGRAM_BOT_TOKEN.
+ * Пользователь только читается из PostgreSQL — запись здесь не нужна, потому что
+ * вход по /api/auth/telegram уже создал его.
+ */
+export async function getUserFromInitData(rawInitData: string | null): Promise<UserRow | null> {
+  const botToken = getTelegramBotToken();
+  if (!rawInitData || !botToken) return null;
+
+  const verification = validateTelegramInitData(rawInitData, botToken);
+  if (!verification.valid || !verification.user) return null;
+
+  return getUserByTelegramId(String(verification.user.id));
 }

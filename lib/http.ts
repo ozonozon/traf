@@ -1,9 +1,11 @@
 import "server-only";
 
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { getCurrentUser } from "./auth";
+import { getCurrentUser, getUserFromInitData } from "./auth";
 import type { UserRow } from "./db";
+import { TELEGRAM_INIT_DATA_HEADER } from "./telegram";
 
 export interface IssuePayload {
   path: string;
@@ -63,12 +65,20 @@ export function handleRouteError(error: unknown): NextResponse {
 /**
  * Пользователь из подписанной сессии или 401.
  * Telegram id и userId с фронтенда никогда не принимаются как доверенные.
+ *
+ * Если сессионной cookie нет, принимается initData в заголовке `X-Telegram-Init-Data`
+ * (тот же формат и та же проверка подписи, что при входе). Это нужно для случаев, когда
+ * Telegram-клиент не сохраняет cookie (Mini App в iframe) — иначе кнопки защищённых
+ * действий отвечали бы 401 при полностью рабочем входе.
  */
 export async function requireUser(): Promise<UserRow> {
   const user = await getCurrentUser();
-  if (!user) {
-    throw new RouteError("UNAUTHORIZED", "Нужно открыть приложение внутри Telegram", 401);
-  }
-  return user;
+  if (user) return user;
+
+  const initDataHeader = (await headers()).get(TELEGRAM_INIT_DATA_HEADER);
+  const userFromInitData = await getUserFromInitData(initDataHeader);
+  if (userFromInitData) return userFromInitData;
+
+  throw new RouteError("UNAUTHORIZED", "Нужно открыть приложение внутри Telegram", 401);
 }
 

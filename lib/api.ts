@@ -1,3 +1,5 @@
+import { getInitData, TELEGRAM_INIT_DATA_HEADER } from "./telegram";
+
 /** Единый формат ошибок API: { code, message, issues?, details? }. */
 export interface ApiErrorPayload {
   code: string;
@@ -44,7 +46,10 @@ async function parseError(response: Response): Promise<ApiError> {
  *
  * Единая точка для всех запросов к API приложения:
  *  - same-origin относительные URL (никаких внешних origin — CORS не нужен);
- *  - `credentials: "include"` — session cookie обязана уходить с каждым запросом;
+ *  - `credentials: "include"` — session cookie уходит с каждым запросом;
+ *  - `X-Telegram-Init-Data` — тот же initData, что уже проверен при входе. Сервер
+ *    использует его только если cookie не пришла (Telegram Web/Desktop в iframe,
+ *    блокировка сторонних cookie). Так защищённые действия работают и без cookie;
  *  - `cache: "no-store"` — ответы API не кэшируются.
  */
 export async function apiFetch<T>(url: string, options?: { json?: unknown; method?: string }): Promise<T> {
@@ -54,6 +59,13 @@ export async function apiFetch<T>(url: string, options?: { json?: unknown; metho
     credentials: "include",
     headers: { Accept: "application/json" },
   };
+
+  if (typeof window !== "undefined") {
+    const initData = getInitData();
+    if (initData) {
+      init.headers = { ...init.headers, [TELEGRAM_INIT_DATA_HEADER]: initData };
+    }
+  }
 
   if (options?.json !== undefined) {
     init.headers = { ...init.headers, "Content-Type": "application/json" };

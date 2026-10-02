@@ -92,6 +92,13 @@ export function getInitData(): string {
 }
 
 /**
+ * Заголовок, которым клиент дублирует initData для защищённых запросов.
+ * Сервер принимает его только если сессионная cookie не пришла (Mini App в iframe),
+ * и проверяет той же подписью, что и при входе.
+ */
+export const TELEGRAM_INIT_DATA_HEADER = "x-telegram-init-data";
+
+/**
  * Ждёт, пока Telegram-клиент отдаст initData.
  *
  * На холодном старте Mini App объект window.Telegram и строка initData появляются
