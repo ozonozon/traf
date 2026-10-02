@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useSession } from "@/components/telegram/TelegramProvider";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { apiFetch, isApiError } from "@/lib/api";
+import { isApiError } from "@/lib/api";
 import { hapticNotification, hapticSelection, openExternalLink } from "@/lib/telegram";
 import type { ChannelRequestsResponseDto, SubmissionResponseDto, TaskChannelDto, TaskDetailDto } from "@/lib/types";
 import { cn, formatRub } from "@/lib/utils";
@@ -23,7 +23,7 @@ import { TaskSuccess } from "./TaskSuccess";
  */
 export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   const toast = useToast();
-  const { setUser } = useSession();
+  const { setUser, authedFetch } = useSession();
 
   const [channels, setChannels] = useState<TaskChannelDto[]>(task.channels ?? []);
   const [isChecking, setIsChecking] = useState(false);
@@ -50,7 +50,7 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
 
     setIsChecking(true);
     try {
-      const response = await apiFetch<ChannelRequestsResponseDto>("/api/channel-requests");
+      const response = await authedFetch<ChannelRequestsResponseDto>("/api/channel-requests");
       setChannels((current) =>
         current.map((channel) => {
           const fresh = response.channels.find((item) => item.id === channel.id);
@@ -81,7 +81,7 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
 
     setIsSubmitting(true);
     try {
-      const response = await apiFetch<SubmissionResponseDto>("/api/submissions", {
+      const response = await authedFetch<SubmissionResponseDto>("/api/submissions", {
         json: { taskId: task.id },
       });
       setUser(response.user);

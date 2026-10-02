@@ -9,24 +9,21 @@ import { AppFrame } from "@/components/layout/AppFrame";
 import { BalancePill } from "@/components/layout/BalancePill";
 import { TaskRunner } from "@/components/tasks/TaskRunner";
 import { TelegramSubscription } from "@/components/tasks/TelegramSubscription";
-import { useSession } from "@/components/telegram/TelegramProvider";
-import { Skeleton } from "@/components/ui/Skeleton";
-import { ErrorState } from "@/components/ui/States";
-import { useApi } from "@/lib/hooks";
+import { useAuthedApi } from "@/lib/hooks";
 import { TELEGRAM_SUBSCRIPTION_TASK_ID, TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "@/lib/task-constants";
 import type { TaskDetailResponseDto } from "@/lib/types";
 import { formatDeadline, formatRub } from "@/lib/utils";
+
+import { Skeleton } from "@/components/ui/Skeleton";
+import { ErrorState } from "@/components/ui/States";
 
 /** Экран отдельного задания: условия, варианты ответа, свой текст, оценка. */
 export default function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const { isLoading: isSessionLoading } = useSession();
-  // Ждём bootstrap сессии: от неё зависит состояние submission у задания.
-  const { data, error, isLoading, refresh } = useApi<TaskDetailResponseDto>(
-    isSessionLoading ? null : `/api/tasks/${id}`,
-  );
-  const isPending = isSessionLoading || isLoading;
+  // Запрос уходит только после успешной Telegram-авторизации (useAuthedApi).
+  const { data, error, isLoading, refresh } = useAuthedApi<TaskDetailResponseDto>(`/api/tasks/${id}`);
+  const isPending = isLoading;
   const task = data?.task ?? null;
   const isSubscriptionTask = task?.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE;
 

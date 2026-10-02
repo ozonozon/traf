@@ -89,7 +89,7 @@ export function initials(firstName: string, lastName?: string | null, username?:
 /** Детерминированный цвет аватара (без внешних сервисов). */
 export function avatarGradient(seed: string): string {
   const palette = [
-    ["#6C5CE7", "#8F7BFF"],
+    ["#0062FD", "#3D8BFF"],
     ["#20B26B", "#4BD08B"],
     ["#F59E0B", "#FBBF24"],
     ["#EF4444", "#F87171"],

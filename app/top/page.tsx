@@ -3,12 +3,9 @@
 import { AppFrame } from "@/components/layout/AppFrame";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { LeaderboardList } from "@/components/leaderboard/LeaderboardList";
-import { useSession } from "@/components/telegram/TelegramProvider";
 
 /** Экран «Топ»: ТОП-30 участников платформы. */
 export default function TopPage() {
-  const { isLoading: isSessionLoading } = useSession();
-
   return (
     <AppFrame>
       <AppHeader />
@@ -21,7 +18,7 @@ export default function TopPage() {
         </p>
 
         <div className="mt-4">
-          <LeaderboardList ready={!isSessionLoading} />
+          <LeaderboardList />
         </div>
       </main>
     </AppFrame>

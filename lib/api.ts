@@ -40,11 +40,18 @@ async function parseError(response: Response): Promise<ApiError> {
   }
 }
 
-/** fetch с JSON-ответом и унифицированными ошибками. */
+/** fetch с JSON-ответом и унифицированными ошибками.
+ *
+ * Единая точка для всех запросов к API приложения:
+ *  - same-origin относительные URL (никаких внешних origin — CORS не нужен);
+ *  - `credentials: "include"` — session cookie обязана уходить с каждым запросом;
+ *  - `cache: "no-store"` — ответы API не кэшируются.
+ */
 export async function apiFetch<T>(url: string, options?: { json?: unknown; method?: string }): Promise<T> {
   const init: RequestInit = {
     method: options?.method ?? (options?.json ? "POST" : "GET"),
     cache: "no-store",
+    credentials: "include",
     headers: { Accept: "application/json" },
   };
 

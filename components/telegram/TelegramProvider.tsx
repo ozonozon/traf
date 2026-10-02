@@ -12,21 +12,45 @@ import {
 } from "react";
 
 import { apiFetch, isApiError, type ApiError } from "@/lib/api";
-import { getInitData, getTelegramUser, hideBackButton, initTelegram, showBackButton, toLocalUser } from "@/lib/telegram";
+import {
+  getTelegramUser,
+  hideBackButton,
+  initTelegram,
+  showBackButton,
+  toLocalUser,
+  waitForInitData,
+} from "@/lib/telegram";
 import type { AuthResponseDto, ProfileResponseDto, PublicUserDto } from "@/lib/types";
 
+export type SessionStatus = "loading" | "ready" | "error";
+
 interface SessionValue {
-  user: PublicUserDto | null;
+  /** loading — идёт авторизация; ready — сессия установлена; error — вход не удался. */
+  status: SessionStatus;
+  /** true только после успешной авторизации: до этого защищённые запросы не выполняются. */
+  isReady: boolean;
+  /** Совместимость со страницами: true, пока авторизация не завершена. */
   isLoading: boolean;
+  user: PublicUserDto | null;
   error: ApiError | null;
   isDemo: boolean;
+  /** Растёт при каждом успешном входе — по нему экраны перезапрашивают данные. */
+  version: number;
+  /** Повторить вход (например, если initData пришёл позже). */
   retry: () => void;
+  reauthenticate: () => Promise<PublicUserDto | null>;
+  /** fetch к API с session cookie и одним автоматическим повтором при 401. */
+  authedFetch: <T>(url: string, options?: { json?: unknown; method?: string }) => Promise<T>;
   setUser: (user: PublicUserDto) => void;
   refreshUser: () => Promise<void>;
 }
 
 interface SessionState {
-  key: number;
+  /** Номер попытки входа, к которой относится это состояние (свежесть состояния). */
+  attempt: number;
+  /** Растёт при каждом успешном входе: по нему экраны перезапрашивают данные. */
+  version: number;
+  status: SessionStatus;
   user: PublicUserDto | null;
   error: ApiError | null;
 }
@@ -41,21 +65,61 @@ function toApiError(cause: unknown): ApiError {
 /**
  * Пользователь для отображения, когда серверный вход не удался: имя, @username и аватар
  * из Telegram. Так профиль и шапка не остаются пустыми, а суммы подтянутся, как только
- * сессия появится (регистрация состояния идёт через подписанную cookie на сервере).
+ * сессия появится (данные пользователя живут в PostgreSQL, доступ — по session cookie).
  */
 function localUserFromTelegram(): PublicUserDto | null {
   const telegramUser = getTelegramUser();
   return telegramUser ? toLocalUser(telegramUser) : null;
 }
 
+/**
+ * Авторизация Telegram Mini App.
+ *
+ * Гарантированный порядок:
+ *  1) ждём initData от Telegram-клиента (он появляется не мгновенно);
+ *  2) отправляем его в /api/auth/telegram;
+ *  3) сервер проверяет подпись и находит/создаёт пользователя в PostgreSQL;
+ *  4) сервер ставит подписанную session cookie;
+ *  5) только после успеха status становится "ready", и экраны (через useAuthedApi)
+ *     начинают вызывать /api/channel-requests, /api/stats, /api/leaderboard,
+ *     /api/profile, /api/transactions. Раньше этого момента защищённые запросы не идут.
+ */
 export function TelegramProvider({ children }: { children: ReactNode }) {
-  const [nonce, setNonce] = useState(0);
+  const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<SessionState | null>(null);
 
   const router = useRouter();
   const pathname = usePathname();
 
-  // Авторизация: initData уходит на сервер, сервер валидирует подпись и ставит сессию.
+  /** Один вход: initData → /api/auth/telegram → сессия. Возвращает пользователя. */
+  const signIn = useCallback(async (): Promise<PublicUserDto> => {
+    const initData = await waitForInitData();
+    const data = await apiFetch<AuthResponseDto>("/api/auth/telegram", { json: { initData } });
+    return data.user;
+  }, []);
+
+  /** Фиксирует успешный вход: состояние становится ready, версия сессии растёт. */
+  const applyUser = useCallback((user: PublicUserDto) => {
+    setState((current) => ({
+      attempt: current?.attempt ?? 0,
+      version: (current?.version ?? 0) + 1,
+      status: "ready",
+      user,
+      error: null,
+    }));
+  }, []);
+
+  const reauthenticate = useCallback(async (): Promise<PublicUserDto | null> => {
+    try {
+      const user = await signIn();
+      applyUser(user);
+      return user;
+    } catch {
+      return null;
+    }
+  }, [signIn, applyUser]);
+
+  // Основной эффект авторизации: монтирование и повтор по retry().
   useEffect(() => {
     let cancelled = false;
 
@@ -63,21 +127,64 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const data = await apiFetch<AuthResponseDto>("/api/auth/telegram", { json: { initData: getInitData() } });
+        const user = await signIn();
         if (cancelled) return;
-        setState({ key: nonce, user: data.user, error: null });
+        setState((current) => ({
+          attempt,
+          version: (current?.version ?? 0) + 1,
+          status: "ready",
+          user,
+          error: null,
+        }));
       } catch (cause) {
         if (cancelled) return;
-        setState({ key: nonce, user: localUserFromTelegram(), error: toApiError(cause) });
+        setState((current) => ({
+          attempt,
+          version: current?.version ?? 0,
+          status: "error",
+          user: localUserFromTelegram(),
+          error: toApiError(cause),
+        }));
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [nonce]);
+  }, [attempt, signIn]);
+
+  const retry = useCallback(() => setAttempt((current) => current + 1), []);
 
   // Тема управляется ThemeProvider (components/theme/theme-provider.tsx).
+
+  /**
+   * Если Mini App вернулся из фона (например, пользователь отправлял заявку в канале),
+   * а сессии всё ещё нет — пробуем войти снова: initData к этому моменту уже есть.
+   */
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (state?.status === "error") retry();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [state, retry]);
+
+  /** Единый авторизованный fetch: 401 → один повторный вход → повтор запроса. */
+  const authedFetch = useCallback(
+    async <T,>(url: string, options?: { json?: unknown; method?: string }): Promise<T> => {
+      try {
+        return await apiFetch<T>(url, options);
+      } catch (cause) {
+        if (!isApiError(cause) || cause.status !== 401) throw cause;
+
+        const user = await reauthenticate();
+        if (!user) throw cause;
+        return apiFetch<T>(url, options);
+      }
+    },
+    [reauthenticate],
+  );
 
   // Нативная кнопка «Назад» только на внутренних экранах.
   useEffect(() => {
@@ -97,35 +204,38 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      const data = await apiFetch<ProfileResponseDto>("/api/profile");
-      setState((current) => ({ key: current?.key ?? 0, user: data.user, error: null }));
+      const data = await authedFetch<ProfileResponseDto>("/api/profile");
+      setState((current) => (current ? { ...current, user: data.user, error: null } : current));
     } catch {
       // Тихо игнорируем: баланс обновится при следующем запросе.
     }
-  }, []);
+  }, [authedFetch]);
 
   const setUser = useCallback((nextUser: PublicUserDto) => {
-    setState((current) => ({ key: current?.key ?? 0, user: nextUser, error: null }));
+    setState((current) => (current ? { ...current, user: nextUser } : current));
   }, []);
 
-  const retry = useCallback(() => setNonce((current) => current + 1), []);
-
-  const isFresh = state !== null && state.key === nonce;
-  const user = isFresh ? state.user : null;
-  const error = isFresh ? state.error : null;
-  const isLoading = !isFresh;
+  const isFresh = state !== null && state.attempt === attempt;
+  const status: SessionStatus = isFresh && state ? state.status : "loading";
+  const user = isFresh && state ? state.user : null;
+  const error = isFresh && state ? state.error : null;
 
   const value = useMemo<SessionValue>(
     () => ({
+      status,
+      isReady: status === "ready",
+      isLoading: status === "loading",
       user,
-      isLoading,
       error,
       isDemo: user?.isDemo ?? false,
+      version: state?.version ?? 0,
       retry,
+      reauthenticate,
+      authedFetch,
       setUser,
       refreshUser,
     }),
-    [user, isLoading, error, retry, setUser, refreshUser],
+    [status, user, error, state, retry, reauthenticate, authedFetch, setUser, refreshUser],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

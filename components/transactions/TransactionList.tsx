@@ -6,30 +6,43 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { TransactionsSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { apiFetch, isApiError, type ApiError } from "@/lib/api";
+import { useSession } from "@/components/telegram/TelegramProvider";
+import { isApiError, type ApiError } from "@/lib/api";
 import type { TransactionDto, TransactionsResponseDto } from "@/lib/types";
 import { cn, formatDate, formatSignedRub } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
 
-/** История виртуальных операций (+ начисления, − игровое использование). */
+/**
+ * История виртуальных операций (+ начисления, − игровое использование).
+ * Запросы идут через session.authedFetch: до завершения Telegram-авторизации
+ * ни один запрос не отправляется, а 401 лечится повторным входом.
+ */
 export function TransactionList() {
+  const session = useSession();
   const [transactions, setTransactions] = useState<TransactionDto[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [nonce, setNonce] = useState(0);
+
+  const { isReady, version, authedFetch } = session;
 
   useEffect(() => {
+    // Пока сессии нет — данные не запрашиваем, показываем скелетон.
+    if (!isReady) return undefined;
+
     let cancelled = false;
 
-    apiFetch<TransactionsResponseDto>(`/api/transactions?page=1&limit=${PAGE_SIZE}`)
+    authedFetch<TransactionsResponseDto>(`/api/transactions?page=1&limit=${PAGE_SIZE}`)
       .then((response) => {
         if (cancelled) return;
         setTransactions(response.transactions);
         setPage(response.page);
         setHasMore(response.hasMore);
+        setError(null);
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
@@ -46,12 +59,12 @@ export function TransactionList() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isReady, version, authedFetch, nonce]);
 
   async function loadMore() {
     setIsLoadingMore(true);
     try {
-      const response = await apiFetch<TransactionsResponseDto>(
+      const response = await authedFetch<TransactionsResponseDto>(
         `/api/transactions?page=${page + 1}&limit=${PAGE_SIZE}`,
       );
       setTransactions((current) => [...current, ...response.transactions]);
@@ -64,8 +77,20 @@ export function TransactionList() {
     }
   }
 
+  function retry() {
+    if (!isReady) session.retry();
+    setIsLoading(true);
+    setError(null);
+    setNonce((value) => value + 1);
+  }
+
+  // Вход не удался — показываем ошибку с кнопкой повтора (она повторит авторизацию).
+  if (!isReady) {
+    if (session.status === "error") return <ErrorState onRetry={retry} />;
+    return <TransactionsSkeleton count={4} />;
+  }
   if (isLoading) return <TransactionsSkeleton count={4} />;
-  if (error) return <ErrorState onRetry={() => window.location.reload()} />;
+  if (error) return <ErrorState onRetry={retry} />;
   if (transactions.length === 0) {
     return <EmptyState title="История пока пустая" description="Выполните задание — операция появится здесь." />;
   }

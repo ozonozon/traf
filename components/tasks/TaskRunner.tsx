@@ -6,7 +6,7 @@ import { useSession } from "@/components/telegram/TelegramProvider";
 import { Button } from "@/components/ui/Button";
 import { Stars } from "@/components/ui/Stars";
 import { useToast } from "@/components/ui/Toast";
-import { apiFetch, isApiError } from "@/lib/api";
+import { isApiError } from "@/lib/api";
 import { hapticNotification, hapticSelection } from "@/lib/telegram";
 import type { SubmissionResponseDto, TaskDetailDto } from "@/lib/types";
 import { cn, formatRub, getErrorMessage, plural } from "@/lib/utils";
@@ -16,7 +16,7 @@ import { TaskSuccess } from "./TaskSuccess";
 /** Форма выполнения тренировочного задания: вариант ответа, свой текст, оценка. */
 export function TaskRunner({ task }: { task: TaskDetailDto }) {
   const toast = useToast();
-  const { setUser } = useSession();
+  const { setUser, authedFetch } = useSession();
 
   const [answer, setAnswer] = useState(task.submission?.answer ?? "");
   const [rating, setRating] = useState<number | null>(task.submission?.rating ?? null);
@@ -46,7 +46,7 @@ export function TaskRunner({ task }: { task: TaskDetailDto }) {
     if (isDisabled) return;
     setIsSubmitting(true);
     try {
-      const response = await apiFetch<SubmissionResponseDto>("/api/submissions", {
+      const response = await authedFetch<SubmissionResponseDto>("/api/submissions", {
         json: {
           taskId: task.id,
           answer: trimmed,

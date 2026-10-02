@@ -80,15 +80,44 @@ npm run dev
   iframe Telegram Web/Desktop), `lax` локально, TTL 30 дней;
 - баланс, заявки, выполненные задания и операции в cookie **не хранятся** — они в PostgreSQL.
 
+### Порядок авторизации (нельзя нарушать)
+
+1. `TelegramProvider` (`components/telegram/TelegramProvider.tsx`) ждёт `initData` от
+   Telegram-клиента (`waitForInitData` в `lib/telegram.ts`): на холодном старте клиент отдаёт
+   его с задержкой, поэтому SDK опрашивается до 8 c (вне Telegram — быстрый выход).
+2. Только после появления `initData` уходит `POST /api/auth/telegram`.
+3. Сервер проверяет HMAC-подпись, находит/создаёт пользователя в PostgreSQL
+   (`INSERT … ON CONFLICT (telegram_id) DO UPDATE`) и ставит подписанную cookie.
+4. Клиент получает 200 → `session.status = "ready"`, растёт `session.version`.
+5. **Лишь теперь** экраны запрашивают данные: `useAuthedApi()` (`lib/hooks.ts`) отдаёт
+   `null`-URL до готовности сессии, поэтому `/api/channel-requests`, `/api/stats`,
+   `/api/leaderboard`, `/api/profile`, `/api/transactions` физически не уходят раньше входа.
+6. Все запросы идут через один механизм: `apiFetch` (`lib/api.ts`, `credentials: "include"`,
+   `cache: "no-store"`) и `session.authedFetch`, который при 401 один раз повторяет вход
+   и повторяет запрос. При смене `session.version` данные перезапрашиваются автоматически.
+
+Если Mini App вернулся из фона без сессии (например, пользователь отправлял заявку в канале),
+вход повторяется автоматически по `visibilitychange`, а на экранах есть кнопка «Повторить».
+
+Быстрая диагностика production (без секретов): `GET /api/health` показывает
+`database.configured/reachable/schema`, короткую причину сбоя (`SCHEMA_MISSING`,
+`AUTH_FAILED`, `HOST_NOT_FOUND`, …) и наличие `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`,
+`AUTH_SECRET`, `NEXT_PUBLIC_APP_URL` (только `true/false`).
+
 ## Деплой на Vercel
 
 1. Создайте базу в Neon и скопируйте pooled-строку подключения.
-2. Примените схему один раз (локально, указав эту строку):
+2. Схема **создаётся автоматически** при первом обращении к базе (`ensureSchema()` в
+   `lib/db.ts` выполняет тот же идемпотентный DDL, что и `scripts/init-db.sql`) — пустая
+   база больше не ломает `/api/stats`, `/api/leaderboard` и вход. Демо-заполнение
+   (120 участников, флаг `is_demo`) по-прежнему добавляется вручную:
    `DATABASE_URL="<строка Neon>" npm run db:init`
 3. Импортируйте репозиторий в Vercel. **Build Command менять не нужно** — стандартный
    `next build`; обращений к базе во время сборки нет (пул создаётся лениво, в runtime).
 4. В **Settings → Environment Variables** задайте для Production и Preview:
    `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `AUTH_SECRET`, `NEXT_PUBLIC_APP_URL`.
+   `NEXT_PUBLIC_APP_URL` подставляется **на этапе сборки**, поэтому после его изменения
+   нужен новый деплой. Проверить значения на деплое: `GET /api/health`.
 5. Deploy. После деплоя укажите URL приложения в BotFather (`/newapp`) и откройте Mini App.
 
 Проверки локально:
@@ -206,6 +235,7 @@ Telegram Update на `/api/telegram/webhook` — так проверяется �
 | GET | `/api/transactions` | история виртуальных операций пользователя (пагинация) |
 | GET | `/api/leaderboard` | ТОП-30 по `total_earned DESC` + блок текущего пользователя |
 | GET | `/api/stats` | участники и выплаченные бонусы по таблице `users` |
+| GET | `/api/health` | диагностика окружения: доступность базы, наличие схемы, короткая причина сбоя, наличие серверных переменных (без секретов) |
 | POST | `/api/telegram/webhook` | Telegram Update: `chat_join_request` → запись в `channel_requests`; `/start` → приветствие с кнопкой «Открыть» |
 
 Админ-API (`/api/admin/*`) в MVP удалён вместе с БД: задания задаются в коде,
@@ -272,7 +302,7 @@ lib/            db.ts (пул pg + все SQL-запросы), session.ts (по�
                 auth.ts (initData, вход, текущий пользователь), tasks.ts (состояния заданий),
                 demo-data.ts (тексты заданий), telegram.ts (WebApp API), env.ts, http.ts,
                 utils.ts, validation.ts, types.ts, hooks.ts, theme-script.ts
-config/         branding.ts (название, описание, иконка, акцентный цвет #6C5CE7),
+config/         branding.ts (название, описание, иконка, акцентный цвет #0062FD),
                 telegram-channels.ts (каналы задания-подписки)
 scripts/        init-db.sql + init-db.mjs (схема и демо-заполнение, npm run db:init)
 ```
@@ -299,13 +329,14 @@ scripts/        init-db.sql + init-db.mjs (схема и демо-заполне
 - Тема применяется inline-скриптом в `<head>` (`lib/theme-script.ts`) **до первой отрисовки** —
   мигания светлого экрана нет.
 - Все цвета живут в CSS-переменных (`app/globals.css`), в компонентах нет ни одного
-  `dark:`-класса или хардкод-цвета. `--primary` всегда `#6C5CE7` в обеих темах.
+  `dark:`-класса или хардкод-цвета. Акцент — основной синий логотипа PayDoEarn
+  **`#0062FD`** (RGB 0/98/253), `--primary` одинаков в обеих темах.
 - Переключение сопровождается коротким переходом 150ms (класс `theme-transition` на `<html>`),
   обычные тапы остаются мгновенными.
 
 Тёмная тема — не инверсия: `--background: #111111`, `--card: #1C1C1E`,
 `--card-secondary: #242428`, `--border: #343438`, `--muted: #A1A1AA`,
-`--primary-soft: #282340`, невыбранные звёзды `#4A4A50`.
+`--primary-soft: #0F1B2D` (синий акцент в тёмной поверхности), невыбранные звёзды `#4A4A50`.
 
 ## Скролл
 
@@ -329,6 +360,7 @@ npm run typecheck   # 0 ошибок TypeScript
 npm run lint        # 0 замечаний ESLint
 npm run build       # production-сборка (без DATABASE_URL)
 npm run start       # прод-сервер: страницы и API работают без внешней БД
+curl localhost:3000/api/health   # диагностика окружения и базы
 ```
 
 

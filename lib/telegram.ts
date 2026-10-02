@@ -91,6 +91,39 @@ export function getInitData(): string {
   return getWebApp()?.initData ?? "";
 }
 
+/**
+ * Ждёт, пока Telegram-клиент отдаст initData.
+ *
+ * На холодном старте Mini App объект window.Telegram и строка initData появляются
+ * не строго к моменту гидратации: клиент подставляет их чуть позже, а SDK грузится
+ * отдельным скриптом. Без ожидания авторизация уходит на сервер с пустым initData,
+ * падает, и всё приложение остаётся неавторизованным до перезагрузки.
+ *
+ * Внутри Telegram (в URL есть tgWebAppData) ждём до timeoutMs; в обычном браузере,
+ * где SDK уже загрузился, но initData так и не появился, выходим раньше — ждать нечего.
+ */
+export async function waitForInitData(timeoutMs = 8000, stepMs = 150): Promise<string> {
+  if (typeof window === "undefined") return "";
+
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  const looksLikeMiniApp = /tgWebAppData/.test(window.location.hash) || /tgWebAppData/.test(window.location.search);
+
+  for (;;) {
+    const webApp = getWebApp();
+    if (webApp) {
+      // ready()/expand() вызываем сразу, как только SDK появился.
+      initTelegram();
+      if (webApp.initData) return webApp.initData;
+    }
+
+    // Вне Telegram (в URL нет tgWebAppData) ждать нечего: не держим интерфейс в загрузке.
+    if (!looksLikeMiniApp && Date.now() - startedAt > 1500) return getInitData();
+    if (Date.now() >= deadline) return getInitData();
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+  }
+}
+
 /** Пользователь из initDataUnsafe (только для UI, доверять можно лишь серверу). */
 export function getTelegramUser(): TelegramUser | null {
   return getWebApp()?.initDataUnsafe?.user ?? null;

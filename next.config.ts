@@ -2,7 +2,10 @@ import type { NextConfig } from "next";
 
 /**
  * MVP-конфигурация без ORM: доступ к PostgreSQL идёт через `pg` из server-only модуля.
- * Пакет не бандлится, а подключается как внешний модуль — его нативные части не ломают сборку.
+ *
+ * `pg` остаётся внешним пакетом (`serverExternalPackages`): у него есть условный
+ * `require('pg-native')`, который bundler не может разрешить, а на Vercel зависимости
+ * трассируются в serverless-функцию как есть.
  */
 const nextConfig: NextConfig = {
   serverExternalPackages: ["pg"],

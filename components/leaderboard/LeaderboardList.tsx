@@ -1,11 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { Avatar } from "@/components/ui/Avatar";
 import { LeaderboardSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { apiFetch, isApiError, type ApiError } from "@/lib/api";
+import { useAuthedApi } from "@/lib/hooks";
 import type { LeaderboardCurrentUserDto, LeaderboardEntryDto, LeaderboardResponseDto } from "@/lib/types";
 import { cn, formatRub, plural } from "@/lib/utils";
 
@@ -99,48 +97,15 @@ function CurrentUserBlock({ currentUser }: { currentUser: LeaderboardCurrentUser
 /**
  * ТОП-30 участников + отдельный блок текущего пользователя.
  * Список скроллится вместе со страницей — внутреннего scroll-контейнера нет.
+ *
+ * Данные запрашиваются через useAuthedApi: до завершения Telegram-авторизации запрос
+ * не отправляется, при 401 выполняется один повторный вход, при смене сессии — перезапрос.
  */
-export function LeaderboardList({ ready = true }: { ready?: boolean }) {
-  const [data, setData] = useState<LeaderboardResponseDto | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<ApiError | null>(null);
-  const [nonce, setNonce] = useState(0);
-
-  useEffect(() => {
-    // Ждём bootstrap сессии: иначе не определится текущий пользователь.
-    if (!ready) return undefined;
-
-    let cancelled = false;
-
-    apiFetch<LeaderboardResponseDto>("/api/leaderboard")
-      .then((response) => {
-        if (!cancelled) setData(response);
-      })
-      .catch((cause: unknown) => {
-        if (cancelled) return;
-        setError(
-          isApiError(cause)
-            ? cause
-            : (Object.assign(new Error("Request failed"), { code: "REQUEST_FAILED", status: 0 }) as ApiError),
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [ready, nonce]);
-
-  function retry() {
-    setIsLoading(true);
-    setError(null);
-    setNonce((value) => value + 1);
-  }
+export function LeaderboardList() {
+  const { data, error, isLoading, refresh } = useAuthedApi<LeaderboardResponseDto>("/api/leaderboard");
 
   if (isLoading) return <LeaderboardSkeleton count={8} />;
-  if (error) return <ErrorState onRetry={retry} />;
+  if (error) return <ErrorState onRetry={refresh} />;
   if (!data || data.entries.length === 0) {
     return <EmptyState title="Рейтинг пока пустой" description="Выполните первое задание, чтобы попасть в список." />;
   }

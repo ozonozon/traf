@@ -4,12 +4,12 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  /* Бренд (primary одинаков в обеих темах) */
-  --primary: #6c5ce7;
-  --primary-press: #5a49d6;
-  --primary-soft: #f0edff;
-  --primary-soft-strong: #e6e1ff;
-  --primary-gradient: linear-gradient(135deg, #6c5ce7 0%, #8a7bff 100%);
+  /* Бренд: основной синий из логотипа PayDoEarn (#0062FD, RGB 0/98/253) */
+  --primary: #0062fd;
+  --primary-press: #0052d6;
+  --primary-soft: #ebf2ff;
+  --primary-soft-strong: #d6e6ff;
+  --primary-gradient: linear-gradient(135deg, #0062fd 0%, #3d8bff 100%);
 
   /* Поверхности */
   --page-background: #ffffff;
@@ -44,20 +44,20 @@
 
   --app-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.03), 0 12px 32px -24px rgba(16, 24, 40, 0.35);
   --app-shadow-nav: 0 -10px 34px -26px rgba(16, 24, 40, 0.45);
-  --app-shadow-float: 0 18px 40px -24px rgba(108, 92, 231, 0.55);
+  --app-shadow-float: 0 18px 40px -24px rgba(0, 98, 253, 0.55);
 
   /* Поверхность кнопки на primary-градиенте (карточка баланса) */
   --accent-surface: #ffffff;
-  --accent-surface-text: #4b3fd0;
+  --accent-surface-text: #0a4fd0;
 }
 
 .dark {
   /* Primary не меняется между темами */
-  --primary: #6c5ce7;
-  --primary-press: #7d6ff0;
-  --primary-soft: #282340;
-  --primary-soft-strong: #342c52;
-  --primary-gradient: linear-gradient(135deg, #4b3fc4 0%, #6c5ce7 100%);
+  --primary: #0062fd;
+  --primary-press: #2f7bff;
+  --primary-soft: #0f1b2d;
+  --primary-soft-strong: #0d2345;
+  --primary-gradient: linear-gradient(135deg, #0044c4 0%, #0062fd 100%);
 
   /* Поверхности: не инверсия, а сохранение иерархии */
   --page-background: #111111;
@@ -89,7 +89,7 @@
   --app-shadow-float: 0 18px 40px -24px rgba(0, 0, 0, 0.8);
 
   --accent-surface: #ffffff;
-  --accent-surface-text: #3c30b8;
+  --accent-surface-text: #0b4bd6;
 }
 
 @theme inline {

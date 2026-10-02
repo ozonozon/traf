@@ -9,7 +9,8 @@ export const branding = {
   logoUrl: "/paydoearn-icon.png",
   /** Баннер приветственного сообщения /start (файл лежит в public/telegram-start-banner.png). */
   startBanner: "/telegram-start-banner.png",
-  primaryColor: "#6C5CE7",
+  /** Основной акцент приложения — синий из логотипа PayDoEarn (RGB 0/98/253). */
+  primaryColor: "#0062FD",
 } as const;
 
 export const copy = {

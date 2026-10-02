@@ -5,18 +5,17 @@ import { AppHeader } from "@/components/layout/AppHeader";
 import { TaskCard } from "@/components/tasks/TaskCard";
 import { TaskProgress } from "@/components/tasks/TaskProgress";
 import { TaskStats } from "@/components/tasks/TaskStats";
-import { useSession } from "@/components/telegram/TelegramProvider";
+import { useAuthedApi } from "@/lib/hooks";
+import type { TasksResponseDto } from "@/lib/types";
+
 import { TaskListSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { useApi } from "@/lib/hooks";
-import type { TasksResponseDto } from "@/lib/types";
 
 /** Главный экран: hero, статистика, задания на сегодня. */
 export default function TasksPage() {
-  const { isLoading: isSessionLoading } = useSession();
-  // Ждём bootstrap сессии: от неё зависит состояние «выполнено» у заданий.
-  const { data, error, isLoading, refresh } = useApi<TasksResponseDto>(isSessionLoading ? null : "/api/tasks");
-  const isPending = isSessionLoading || isLoading;
+  // Запрос уходит только после успешной Telegram-авторизации (useAuthedApi).
+  const { data, error, isLoading, refresh } = useAuthedApi<TasksResponseDto>("/api/tasks");
+  const isPending = isLoading;
   const tasks = data?.tasks ?? [];
 
   return (

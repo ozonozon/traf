@@ -10,7 +10,7 @@ import { ThemeSwitcherRow, ThemeToggleButton } from "@/components/theme/ThemeSwi
 import { useSession } from "@/components/telegram/TelegramProvider";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
-import { useApi } from "@/lib/hooks";
+import { useAuthedApi } from "@/lib/hooks";
 import type { ProfileResponseDto } from "@/lib/types";
 
 /**
@@ -23,9 +23,9 @@ import type { ProfileResponseDto } from "@/lib/types";
  */
 export default function ProfilePage() {
   const session = useSession();
-  // Ждём bootstrap сессии, иначе первый запрос уйдёт без cookie.
-  const { data, isLoading, refresh } = useApi<ProfileResponseDto>(session.isLoading ? null : "/api/profile");
-  const isPending = session.isLoading || isLoading;
+  // Запрос профиля уходит только после успешной Telegram-авторизации (useAuthedApi).
+  const { data, isLoading, refresh } = useAuthedApi<ProfileResponseDto>("/api/profile");
+  const isPending = isLoading;
 
   const user = data?.user ?? session.user;
   const isFromServer = data !== null;

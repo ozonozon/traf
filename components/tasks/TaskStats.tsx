@@ -1,6 +1,6 @@
 "use client";
 
-import { useApi } from "@/lib/hooks";
+import { useAuthedApi } from "@/lib/hooks";
 import type { StatsResponseDto } from "@/lib/types";
 import { formatBonusAmount, formatRub } from "@/lib/utils";
 
@@ -14,9 +14,10 @@ interface StatCard {
 /**
  * Статистика главного экрана: две акцентные карточки (primary-soft) и под ними
  * центрированный блок выплаченных бонусов. Данные — из GET /api/stats.
+ * Запрос уходит только после завершения Telegram-авторизации (useAuthedApi).
  */
 export function TaskStats() {
-  const { data, isLoading, error, refresh } = useApi<StatsResponseDto>("/api/stats");
+  const { data, isLoading, error, refresh } = useAuthedApi<StatsResponseDto>("/api/stats");
 
   if (isLoading) return <StatsSkeleton />;
 

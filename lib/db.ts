@@ -33,6 +33,7 @@ function getPool(): Pool {
 }
 
 export async function query<T extends QueryResultRow>(text: string, params: unknown[] = []): Promise<T[]> {
+  await ensureSchema();
   const result = await getPool().query<T>(text, params as never[]);
   return result.rows;
 }
@@ -42,8 +43,95 @@ export async function queryOne<T extends QueryResultRow>(text: string, params: u
   return rows[0] ?? null;
 }
 
+/**
+ * DDL схемы приложения.
+ *
+ * Канонический источник — `scripts/init-db.sql` (для ручного запуска `npm run db:init`).
+ * Здесь та же идемпотентная схема продублирована для runtime: сервер сам создаёт недостающие
+ * таблицы при первом обращении к базе. Без этого на «чистой» production-базе (например,
+ * свежий Neon без прогона `db:init`) любой запрос падал с relation "users" does not exist —
+ * и статистика, рейтинг, профиль и авторизация не работали. При изменении схемы правьте
+ * оба файла.
+ */
+const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS users (
+  id              SERIAL PRIMARY KEY,
+  telegram_id     BIGINT UNIQUE NOT NULL,
+  username        TEXT,
+  first_name      TEXT,
+  last_name       TEXT,
+  balance         INTEGER NOT NULL DEFAULT 0,
+  total_earned    INTEGER NOT NULL DEFAULT 0,
+  completed_tasks INTEGER NOT NULL DEFAULT 0,
+  photo_url       TEXT,
+  is_demo         BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE INDEX IF NOT EXISTS users_total_earned_idx ON users (total_earned DESC);
+
+CREATE TABLE IF NOT EXISTS channel_requests (
+  id           SERIAL PRIMARY KEY,
+  telegram_id  BIGINT NOT NULL,
+  channel_id   TEXT NOT NULL,
+  invite_link  TEXT,
+  requested_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE (telegram_id, channel_id)
+);
+
+CREATE INDEX IF NOT EXISTS channel_requests_telegram_idx ON channel_requests (telegram_id);
+
+CREATE TABLE IF NOT EXISTS task_completions (
+  id           SERIAL PRIMARY KEY,
+  telegram_id  BIGINT NOT NULL,
+  task_id      TEXT NOT NULL,
+  reward       INTEGER NOT NULL,
+  completed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE (telegram_id, task_id)
+);
+
+CREATE INDEX IF NOT EXISTS task_completions_telegram_idx ON task_completions (telegram_id, completed_at);
+
+CREATE TABLE IF NOT EXISTS transactions (
+  id          SERIAL PRIMARY KEY,
+  telegram_id BIGINT NOT NULL,
+  amount      INTEGER NOT NULL,
+  type        TEXT NOT NULL,
+  description TEXT,
+  created_at  TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS transactions_telegram_idx ON transactions (telegram_id, created_at DESC);
+`;
+
+let schemaReady: Promise<void> | null = null;
+
+/**
+ * Проверяет/создаёт схему один раз на процесс (DDL идемпотентный).
+ * При ошибке соединения результат сбрасывается, чтобы следующая попытка повторила DDL.
+ */
+export function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = getPool()
+      .query(SCHEMA_SQL)
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        schemaReady = null;
+        throw error;
+      });
+  }
+
+  return schemaReady;
+}
+
+
 /** Транзакция на одном соединении: при ошибке выполняется ROLLBACK. */
 export async function withTransaction<T>(run: (client: PoolClient) => Promise<T>): Promise<T> {
+  await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
