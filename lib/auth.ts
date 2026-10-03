@@ -29,6 +29,8 @@ export interface InitDataDiagnostics {
   hashLength: number;
   computedHashLength: number;
   hashMatch: boolean;
+  /** По какой схеме совпал hash (для диагностики; null — не совпал). */
+  hashMatchMode: "without-hash" | "without-hash-and-signature" | null;
   userPresent: boolean;
   authDatePresent: boolean;
   authDate: number | null;
@@ -79,20 +81,40 @@ export function validateTelegramInitData(initData: string, botToken: string): In
   const hash = params.get("hash") ?? "";
   const authDateRaw = Number(params.get("auth_date") ?? 0);
   const authAgeSeconds = authDateRaw ? Math.floor(Date.now() / 1000) - authDateRaw : null;
+  const entries = [...params.entries()];
 
-  const dataCheckString = [...params.entries()]
-    .filter(([key]) => key !== "hash" && key !== "signature")
-    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-    .map(([key, value]) => `${key}=${value}`)
-    .join("\n");
+  /**
+   * data_check_string: поля без исключённых, отсортированные по имени (побайтово,
+   * без localeCompare), собранные как "key=value" через "\n".
+   */
+  const buildDataCheckString = (excluded: string[]): string =>
+    entries
+      .filter(([key]) => !excluded.includes(key))
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, value]) => `${key}=${value}`)
+      .join("\n");
 
+  // secret_key = HMAC_SHA256(key="WebAppData", message=botToken)
   const secretKey = crypto.createHmac("sha256", "WebAppData").update(botToken).digest();
-  const computedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+  const computeHash = (dataCheckString: string): string =>
+    crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
 
-  const computedBuffer = Buffer.from(computedHash, "utf8");
-  const receivedBuffer = Buffer.from(hash, "utf8");
-  const hashMatch =
-    Boolean(hash) && computedBuffer.length === receivedBuffer.length && crypto.timingSafeEqual(computedBuffer, receivedBuffer);
+  const hashEquals = (computed: string, received: string): boolean => {
+    const computedBuffer = Buffer.from(computed, "utf8");
+    const receivedBuffer = Buffer.from(received, "utf8");
+    return computedBuffer.length === receivedBuffer.length && crypto.timingSafeEqual(computedBuffer, receivedBuffer);
+  };
+
+  // Основная схема: data_check_string = все поля, кроме hash (aiogram, PHP-пример из
+  // документации, официальный пример бота). Современные клиенты (Bot API 8.0+) добавляют
+  // поле signature — поэтому дополнительно принимаем вариант, где исключён и signature.
+  // Обе схемы проверяются HMAC-подписью бота, ослабления проверки нет.
+  const mainHash = computeHash(buildDataCheckString(["hash"]));
+  const signatureAwareHash = computeHash(buildDataCheckString(["hash", "signature"]));
+
+  const hashMatchMain = Boolean(hash) && hashEquals(mainHash, hash);
+  const hashMatchSignatureAware = Boolean(hash) && !hashMatchMain && hashEquals(signatureAwareHash, hash);
+  const hashMatch = hashMatchMain || hashMatchSignatureAware;
 
   const rawUser = params.get("user");
   let user: TelegramUser | undefined;
@@ -112,8 +134,9 @@ export function validateTelegramInitData(initData: string, botToken: string): In
     initDataLength: raw.length,
     hashPresent: Boolean(hash),
     hashLength: hash.length,
-    computedHashLength: computedHash.length,
+    computedHashLength: mainHash.length,
     hashMatch,
+    hashMatchMode: hashMatchMain ? "without-hash" : hashMatchSignatureAware ? "without-hash-and-signature" : null,
     userPresent: Boolean(rawUser),
     authDatePresent: Boolean(authDateRaw),
     authDate: authDateRaw || null,
