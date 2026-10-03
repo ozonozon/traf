@@ -64,9 +64,19 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
   },
 ];
 
+/**
+ * ЕДИНСТВЕННЫЙ источник порядка каналов: поле `index` (1 → 2 → 3).
+ * API и UI обязаны использовать этот порядок и не сортировать каналы по-своему.
+ */
+export function orderedChannels(
+  channels: TelegramChannelConfig[] = TELEGRAM_CHANNELS,
+): TelegramChannelConfig[] {
+  return [...channels].sort((left, right) => left.index - right.index);
+}
+
 /** Каналы для фронтенда: только то, что нужно интерфейсу (chatId не уходит клиенту). */
 export function publicChannels(channels: TelegramChannelConfig[] = TELEGRAM_CHANNELS): TelegramChannelPublic[] {
-  return channels.map(({ index, id, title, description, inviteLink }) => ({
+  return orderedChannels(channels).map(({ index, id, title, description, inviteLink }) => ({
     index,
     id,
     title,

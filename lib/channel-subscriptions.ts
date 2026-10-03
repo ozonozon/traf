@@ -1,6 +1,6 @@
 import "server-only";
 
-import { TELEGRAM_CHANNELS, publicChannels } from "@/config/telegram-channels";
+import { orderedChannels } from "@/config/telegram-channels";
 
 import { RouteError } from "./http";
 import { getChatMemberStatus } from "./telegram-bot";
@@ -25,12 +25,13 @@ export interface SubscriptionCheck {
 }
 
 export async function checkChannelSubscriptions(telegramId: string): Promise<SubscriptionCheck> {
-  const channels = publicChannels();
+  // Один упорядоченный список (порядок задаёт index в конфиге) — и для проверки, и для ответа.
+  const channels = orderedChannels();
 
   // chat_id для getChatMember берётся только из серверного конфига (config/telegram-channels.ts).
   // Пустой chatId — ошибка настройки: канал считается непроверенным (CHAT_ID_MISSING в lib/telegram-bot.ts).
   const checks = await Promise.all(
-    TELEGRAM_CHANNELS.map((channel) => getChatMemberStatus(channel.chatId, telegramId)),
+    channels.map((channel) => getChatMemberStatus(channel.chatId, telegramId)),
   );
 
   const failed: string[] = [];
