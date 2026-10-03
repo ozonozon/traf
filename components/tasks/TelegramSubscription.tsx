@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "@/components/telegram/TelegramProvider";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { apiFetch, isApiError } from "@/lib/api";
+import { isApiError } from "@/lib/api";
 import { hapticNotification, hapticSelection, openTelegramChannelLink } from "@/lib/telegram";
 import type { ChannelSubscriptionsResponseDto, SubmissionResponseDto, TaskChannelDto, TaskDetailDto } from "@/lib/types";
 import { cn, formatRub, getErrorMessage } from "@/lib/utils";
@@ -25,7 +25,7 @@ import { TaskSuccess } from "./TaskSuccess";
  */
 export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   const toast = useToast();
-  const { setUser } = useSession();
+  const { setUser, authedFetch } = useSession();
 
   // Каналы приходят с сервера из config/telegram-channels.ts (без chatId) —
   // список отдаётся всегда, даже если запрос ушёл без авторизации.
@@ -59,17 +59,18 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   }
 
   // Возврат в Mini App после канала: обновляем статусы повторным запросом (без тостов).
+  // authedFetch — тот же путь, что у /api/profile: при 401 повторяет вход и повторяет запрос.
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
-      apiFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions")
+      authedFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions")
         .then((response) => applySubscriptions(response))
         .catch(() => undefined);
     };
 
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, []);
+  }, [authedFetch]);
 
   /** Спрашивает у сервера фактическую подписку (getChatMember) по всем каналам. */
   async function handleCheck() {
@@ -77,10 +78,9 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
 
     setIsChecking(true);
     try {
-      // Запрос идёт через общий apiFetch: актуальный Telegram.WebApp.initData
-      // подставляется в заголовок X-Telegram-Init-Data, сервер валидирует его
-      // и берёт telegram_id только оттуда. Cookie и сессия не участвуют.
-      const response = await apiFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions");
+      // Тот же авторизованный путь, что у /api/profile: initData в заголовке X-Telegram-Init-Data,
+      // при 401 — один повторный вход и повтор запроса (как у остальных защищённых экранов).
+      const response = await authedFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions");
       applySubscriptions(response);
       setHasChecked(true);
       hapticNotification(response.allSubscribed ? "success" : "warning");
@@ -108,8 +108,7 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
     setIsSubmitting(true);
     try {
       // Сервер сам повторно проверяет подписку через getChatMember перед начислением.
-      // initData уходит тем же заголовком, поэтому награда не зависит от cookie.
-      const response = await apiFetch<SubmissionResponseDto>("/api/submissions", {
+      const response = await authedFetch<SubmissionResponseDto>("/api/submissions", {
         json: { taskId: task.id },
       });
       setUser(response.user);
