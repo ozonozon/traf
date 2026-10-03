@@ -92,13 +92,18 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
       });
     } catch (cause) {
       hapticNotification("error");
-      // ВРЕМЕННАЯ ДИАГНОСТИКА: HTTP-статус, код и текст ошибки (без секретов, cookies и initData).
+      // ВРЕМЕННАЯ ДИАГНОСТИКА: HTTP-статус, код, причина отказа авторизации и текст ошибки.
+      // Значения initData, cookie и токена не показываются.
       const status = isApiError(cause) ? cause.status : 0;
       const code = isApiError(cause) ? cause.code : "REQUEST_FAILED";
       const message = isApiError(cause) ? cause.message : getErrorMessage(code);
-      console.error("[subscriptions] проверка подписки не удалась", { status, code, message });
+      const reason =
+        isApiError(cause) && cause.details && typeof cause.details === "object" && "reason" in cause.details
+          ? String((cause.details as { reason?: unknown }).reason)
+          : null;
+      console.error("[subscriptions] проверка подписки не удалась", { status, code, reason, message });
       toast.show(`Ошибка проверки подписки: HTTP ${status}`, {
-        description: `CODE: ${code} · ${message}`,
+        description: reason ? `CODE: ${code} · REASON: ${reason}` : `CODE: ${code} · ${message}`,
         variant: "error",
       });
     } finally {

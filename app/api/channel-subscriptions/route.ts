@@ -1,8 +1,39 @@
+import { headers } from "next/headers";
+
+import { validateTelegramInitData } from "@/lib/auth";
 import { assertChannelsCheckable, checkChannelSubscriptions } from "@/lib/channel-subscriptions";
-import { handleRouteError, jsonOk, requireUser } from "@/lib/http";
+import { getTelegramBotToken } from "@/lib/env";
+import { RouteError, handleRouteError, jsonError, jsonOk, requireUser } from "@/lib/http";
+import { SESSION_COOKIE } from "@/lib/session";
+import { TELEGRAM_INIT_DATA_HEADER } from "@/lib/telegram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/**
+ * Диагностика причины 401: что именно пришло в запросе и почему requireUser() отказал.
+ * Логируются только факты и длины — без значений initData, cookie, токена и персданных.
+ */
+async function describeUnauthorized(): Promise<string> {
+  const requestHeaders = await headers();
+  const rawInitData = requestHeaders.get(TELEGRAM_INIT_DATA_HEADER) ?? "";
+  const hasCookie = Boolean(requestHeaders.get("cookie")?.includes(`${SESSION_COOKIE}=`));
+  const botToken = getTelegramBotToken();
+  const initDataValid = rawInitData ? validateTelegramInitData(rawInitData, botToken).valid : false;
+
+  console.warn(
+    `[channel-subscriptions] requireUser() вернул 401: X-Telegram-Init-Data ${
+      rawInitData ? `есть (длина ${rawInitData.length}, подпись ${initDataValid ? "валидна" : "невалидна"})` : "отсутствует"
+    }, cookie ${SESSION_COOKIE} ${hasCookie ? "есть" : "отсутствует"}`,
+  );
+
+  if (!rawInitData && !hasCookie) return "NO_INIT_DATA_NO_COOKIE";
+  if (!rawInitData) return "COOKIE_INVALID";
+  if (!initDataValid) return hasCookie ? "INIT_DATA_INVALID_COOKIE_INVALID" : "INIT_DATA_INVALID";
+
+  // initData валиден, но пользователь не нашёлся/не создался в PostgreSQL.
+  return "INIT_DATA_VALID_USER_LOOKUP_FAILED";
+}
 
 /**
  * GET /api/channel-subscriptions — фактическая подписка текущего пользователя
@@ -29,6 +60,11 @@ export async function GET() {
       allSubscribed: check.allSubscribed,
     });
   } catch (error) {
+    if (error instanceof RouteError && error.code === "UNAUTHORIZED") {
+      const reason = await describeUnauthorized();
+      return jsonError(error.code, error.message, error.status, undefined, { reason });
+    }
+
     return handleRouteError(error);
   }
 }
