@@ -238,6 +238,25 @@ export async function waitForInitData(timeoutMs = 8000, stepMs = 150): Promise<s
   }
 }
 
+/**
+ * Открывает Telegram-ссылку (в т.ч. invite-ссылку канала) нативным методом Telegram.
+ * Вызывается кнопкой «ПОДПИСАТЬСЯ»; сама по себе подписку не засчитывает.
+ */
+export function openTelegramChannelLink(url: string): void {
+  const webApp = getWebApp();
+
+  if (webApp?.openTelegramLink) {
+    try {
+      webApp.openTelegramLink(url);
+      return;
+    } catch {
+      // Метод недоступен на старых версиях — открываем обычным способом.
+    }
+  }
+
+  openExternalLink(url);
+}
+
 /** Пользователь из initDataUnsafe (только для UI, доверять можно лишь серверу). */
 export function getTelegramUser(): TelegramUser | null {
   return getWebApp()?.initDataUnsafe?.user ?? null;

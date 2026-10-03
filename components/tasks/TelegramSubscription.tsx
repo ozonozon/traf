@@ -1,13 +1,13 @@
 "use client";
 
 import { Check, Clock, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useSession } from "@/components/telegram/TelegramProvider";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { apiFetch, isApiError } from "@/lib/api";
-import { hapticNotification, hapticSelection, openExternalLink } from "@/lib/telegram";
+import { hapticNotification, hapticSelection, openTelegramChannelLink } from "@/lib/telegram";
 import type { ChannelSubscriptionsResponseDto, SubmissionResponseDto, TaskChannelDto, TaskDetailDto } from "@/lib/types";
 import { cn, formatRub, getErrorMessage } from "@/lib/utils";
 
@@ -16,10 +16,12 @@ import { TaskSuccess } from "./TaskSuccess";
 /**
  * Обязательное задание «Подписка на Telegram-каналы».
  *
- * Кнопка «ПОДПИСАТЬСЯ» только открывает invite-ссылку канала (Telegram.WebApp.openTelegramLink)
- * и ничего не засчитывает. Подписку определяет исключительно сервер: GET /api/channel-subscriptions
- * вызывает Telegram Bot API getChatMember для каждого канала. Награда выдаётся после того,
- * как сервер повторно подтвердит все три подписки.
+ * Кнопка «ПОДПИСАТЬСЯ» только открывает invite-ссылку канала нативным методом Telegram
+ * (`openTelegramLink`) и ничего не засчитывает. Подписку определяет исключительно сервер:
+ * `GET /api/channel-subscriptions` получает актуальный initData из Telegram.WebApp
+ * в заголовке `X-Telegram-Init-Data`, валидирует его и вызывает Bot API `getChatMember`
+ * по каждому каналу из config/telegram-channels.ts. Cookie и сессия для этой проверки
+ * не используются. Награда выдаётся только после повторной серверной проверки всех каналов.
  */
 export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   const toast = useToast();
@@ -39,11 +41,35 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   const subscribedCount = channels.filter((channel) => channel.subscribed).length;
   const allSubscribed = channels.length > 0 && subscribedCount === channels.length;
 
+  /** Переносит подтверждённые подписки из ответа сервера в состояние карточек. */
+  function applySubscriptions(response: ChannelSubscriptionsResponseDto) {
+    setChannels((current) =>
+      current.map((channel) => {
+        const fresh = response.channels.find((item) => item.id === channel.id);
+        return fresh ? { ...channel, subscribed: fresh.subscribed } : channel;
+      }),
+    );
+  }
+
   function handleSubscribe(channel: TaskChannelDto) {
     hapticSelection();
-    // Открывает канал в Telegram. Подписка здесь НЕ засчитывается — только сервер.
-    openExternalLink(channel.inviteLink);
+    // Нативный метод Telegram: переход в канал остаётся внутри Telegram.
+    // Подписка здесь НЕ засчитывается — её определяет только сервер.
+    openTelegramChannelLink(channel.inviteLink);
   }
+
+  // Возврат в Mini App после канала: обновляем статусы повторным запросом (без тостов).
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      apiFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions")
+        .then((response) => applySubscriptions(response))
+        .catch(() => undefined);
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
 
   /** Спрашивает у сервера фактическую подписку (getChatMember) по всем каналам. */
   async function handleCheck() {
@@ -51,16 +77,11 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
 
     setIsChecking(true);
     try {
-      // Запрос идёт через общий apiFetch: initData WebApp подставляется в заголовок
-      // X-Telegram-Init-Data, сервер валидирует его и берёт telegram_id оттуда.
-      // Ни cookie, ни повторный вход для проверки подписки не нужны.
+      // Запрос идёт через общий apiFetch: актуальный Telegram.WebApp.initData
+      // подставляется в заголовок X-Telegram-Init-Data, сервер валидирует его
+      // и берёт telegram_id только оттуда. Cookie и сессия не участвуют.
       const response = await apiFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions");
-      setChannels((current) =>
-        current.map((channel) => {
-          const fresh = response.channels.find((item) => item.id === channel.id);
-          return fresh ? { ...channel, subscribed: fresh.subscribed } : channel;
-        }),
-      );
+      applySubscriptions(response);
       setHasChecked(true);
       hapticNotification(response.allSubscribed ? "success" : "warning");
       toast.show(`Подписки: ${response.subscribedCount} из ${response.total}`, {
