@@ -65,6 +65,7 @@ export async function GET() {
       subscribedCount: check.subscribedCount,
       total: check.total,
       allSubscribed: check.allSubscribed,
+      mode: check.mode,
     });
   } catch (error) {
     if (error instanceof RouteError && error.code === "UNAUTHORIZED") {

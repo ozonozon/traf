@@ -258,7 +258,7 @@ Telegram Update на `/api/telegram/webhook` — так проверяется �
 | GET | `/api/tasks/[id]` | задание, варианты ответов, результат пользователя, каналы |
 | POST | `/api/submissions` | выполнение задания одной транзакцией PostgreSQL (`task_completions` + `transactions` + баланс) |
 | GET | `/api/channel-requests` | ⚠️ legacy: заявки `chat_join_request` (новая механика не использует) |
-| GET | `/api/channel-subscriptions` | фактическая подписка на обязательные каналы: сервер вызывает `getChatMember` по каждому каналу из `config/telegram-channels.ts` |
+| GET | `/api/channel-subscriptions` | результат проверки обязательных каналов: `getChatMember` (режим `subscription`) или заявки из `channel_requests` (режим `join_request`); в ответе поле `mode` |
 | GET | `/api/profile` | профиль и статистика из базы (место в рейтинге, выполнено сегодня) |
 | GET | `/api/transactions` | история виртуальных операций пользователя (пагинация) |
 | GET | `/api/leaderboard` | ТОП-30 по `total_earned DESC` + блок текущего пользователя |
@@ -288,8 +288,49 @@ Telegram Update на `/api/telegram/webhook` — так проверяется �
   `left`, `kicked` и любые ошибки Telegram — не подписка;
 - награда при `3/3`: `POST /api/submissions` **сам повторно** проверяет все каналы через
   `getChatMember` перед начислением — флаги с клиента не принимаются;
-- старые `chat_join_request` / `channel_requests` для этой механики не используются
-  (webhook и роут `/api/channel-requests` оставлены как legacy и нигде не вызываются UI).
+- в режиме `"subscription"` (по умолчанию) `chat_join_request` / `channel_requests` не используются
+  (webhook и роут `/api/channel-requests` — legacy, UI их не вызывает);
+  таблица `channel_requests` подключается только флагом `CHANNEL_CHECK_MODE = "join_request"` (см. ниже).
+
+### Порядок каналов
+
+Порядок каналов в задании задаёт **только поле `index` (1 → 2 → 3)** в `config/telegram-channels.ts`.
+API отдаёт каналы через `orderedChannels()` (сортировка по `index`), а интерфейс
+рисует список в том порядке, в котором он пришёл с сервера — собственную сортировку
+фронтенд не делает. Поэтому менять порядок нужно в конфиге, а не в компонентах.
+
+### Режим проверки: подписка или заявка на вступление
+
+Проверку переключает **один** флаг `CHANNEL_CHECK_MODE` в `config/telegram-channels.ts`:
+
+| Значение | Что проверяется | Как |
+| --- | --- | --- |
+| `"subscription"` (по умолчанию) | фактическая подписка на канал | Telegram Bot API `getChatMember` |
+| `"join_request"` (эксперимент) | отправленная заявка на вступление в закрытый канал | таблица `channel_requests`, куда заявки попадает только update `chat_join_request` |
+
+Две механики не смешиваются: в один момент работает ровно одна.
+В режиме `join_request` `getChatMember` не вызывается вообще, а в режиме `subscription`
+таблица `channel_requests` не читается.
+
+Что нужно для режима `join_request`:
+
+1. Каналы — **закрытые** (вступление по заявке): в настройках канала «Тип канала» →
+   заявки на вступление, а не мгновенное вступление по ссылке.
+2. Бот **администратор каждого канала** с правом **«Приглашать пользователей»**
+   (Invite Users). Без этого Telegram не присылает боту update `chat_join_request`.
+3. Webhook установлен с `allowed_updates`, включающим `chat_join_request`:
+   `curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://YOUR_DOMAIN/api/telegram/webhook&allowed_updates=[\"message\",\"chat_join_request\"]"`.
+4. `chatId` в конфиге совпадает с `chat.id` канала (webhook определяет канал по `invite_link`,
+   а если ссылка не из конфига — по `chat.id`).
+
+Как это работает в Mini App (режим `join_request`): кнопка «ПОДПИСАТЬСЯ» открывает
+invite-ссылку закрытого канала → Telegram показывает вступление по заявке → пользователь
+отправляет заявку → bot webhook получает `chat_join_request` → запись в `channel_requests`
+(`UNIQUE (telegram_id, channel_id)`) → «ПРОВЕРИТЬ ЗАЯВКИ» показывает «Заявка отправлена».
+Награда при 3/3: `POST /api/submissions` перед начислением сам читает заявки из БД.
+
+> ⚠️ В этом режиме факт заявки ≠ факт подписки: заявку может отклонить админ канала.
+> Режим предназначен для эксперимента и включается изменением одного значения флага.
 
 ### Что нужно настроить, чтобы проверка работала
 

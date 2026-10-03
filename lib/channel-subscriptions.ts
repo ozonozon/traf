@@ -1,19 +1,25 @@
 import "server-only";
 
-import { orderedChannels } from "@/config/telegram-channels";
+import { CHANNEL_CHECK_MODE, orderedChannels } from "@/config/telegram-channels";
 
+import { getRequestedChannelIds } from "./db";
 import { RouteError } from "./http";
 import { getChatMemberStatus } from "./telegram-bot";
-import type { ChannelSubscriptionDto } from "./types";
+import type { ChannelCheckMode, ChannelSubscriptionDto } from "./types";
 
 /**
- * Проверка ФАКТИЧЕСКОЙ подписки пользователя на обязательные Telegram-каналы.
+ * Проверка обязательного задания.
  *
- * Единственный источник правды — Telegram Bot API `getChatMember` для каждого канала
- * из config/telegram-channels.ts. Никаких заявок (chat_join_request), тикетов и
- * сохранённых состояний: результат проверки нигде не кэшируется.
+ * Режим задаётся одним переключателем CHANNEL_CHECK_MODE в config/telegram-channels.ts:
  *
- * if Telegram ответил ошибкой — канал НЕ считается подписанным.
+ *  - "subscription" (РАБОЧИЙ) — единственный источник правды Telegram Bot API `getChatMember`
+ *    для каждого канала. Если Telegram ответил ошибкой — канал НЕ считается подписанным.
+ *    Результат нигде не кэшируется, никаких заявок (chat_join_request) не читается.
+ *
+ *  - "join_request" (ЭКСПЕРИМЕНТ) — считаем отправленную заявку на вступление: читаем
+ *    таблицу channel_requests, куда заявки попадают ТОЛЬКО из update chat_join_request
+ *    от Telegram (app/api/telegram/webhook/route.ts). getChatMember не вызывается.
+ *    Старая механика при этом остаётся в коде и включается обратно одним значением флага.
  */
 export interface SubscriptionCheck {
   channels: ChannelSubscriptionDto[];
@@ -22,12 +28,26 @@ export interface SubscriptionCheck {
   allSubscribed: boolean;
   /** Каналы, которые не удалось проверить (нет chatId, бот не в канале, сбой Telegram). */
   failed: string[];
+  /** Активный режим проверки — уходит в API, чтобы UI показал корректные подписи. */
+  mode: ChannelCheckMode;
 }
 
-export async function checkChannelSubscriptions(telegramId: string): Promise<SubscriptionCheck> {
-  // Один упорядоченный список (порядок задаёт index в конфиге) — и для проверки, и для ответа.
-  const channels = orderedChannels();
+/** Экспериментальная ветка: заявка на вступление вместо подписки. */
+async function checkJoinRequests(
+  telegramId: string,
+  channels: ReturnType<typeof orderedChannels>,
+): Promise<SubscriptionCheck> {
+  const requestedChannelIds = await getRequestedChannelIds(telegramId);
+  const result = buildResult(channels, (channel) => requestedChannelIds.includes(channel.id));
 
+  return { ...result, failed: [], mode: CHANNEL_CHECK_MODE };
+}
+
+/** Рабочая ветка: фактическая подписка через Telegram Bot API getChatMember. */
+async function checkRealSubscriptions(
+  telegramId: string,
+  channels: ReturnType<typeof orderedChannels>,
+): Promise<SubscriptionCheck> {
   // chat_id для getChatMember берётся только из серверного конфига (config/telegram-channels.ts).
   // Пустой chatId — ошибка настройки: канал считается непроверенным (CHAT_ID_MISSING в lib/telegram-bot.ts).
   const checks = await Promise.all(
@@ -35,19 +55,27 @@ export async function checkChannelSubscriptions(telegramId: string): Promise<Sub
   );
 
   const failed: string[] = [];
-  const result: ChannelSubscriptionDto[] = channels.map((channel, position) => {
+  const result = buildResult(channels, (channel, position) => {
     const check = checks[position];
     if (check.error && check.error !== "USER_NOT_FOUND") failed.push(channel.id);
-
-    return {
-      id: channel.id,
-      index: channel.index,
-      title: channel.title,
-      description: channel.description,
-      inviteLink: channel.inviteLink,
-      subscribed: check.subscribed,
-    };
+    return check.subscribed;
   });
+
+  return { ...result, failed, mode: CHANNEL_CHECK_MODE };
+}
+
+function buildResult(
+  channels: ReturnType<typeof orderedChannels>,
+  resolve: (channel: ReturnType<typeof orderedChannels>[number], position: number) => boolean,
+): Omit<SubscriptionCheck, "failed" | "mode"> {
+  const result: ChannelSubscriptionDto[] = channels.map((channel, position) => ({
+    id: channel.id,
+    index: channel.index,
+    title: channel.title,
+    description: channel.description,
+    inviteLink: channel.inviteLink,
+    subscribed: resolve(channel, position),
+  }));
 
   const subscribedCount = result.filter((channel) => channel.subscribed).length;
 
@@ -56,8 +84,16 @@ export async function checkChannelSubscriptions(telegramId: string): Promise<Sub
     subscribedCount,
     total: result.length,
     allSubscribed: result.length > 0 && subscribedCount === result.length,
-    failed,
   };
+}
+
+export async function checkChannelSubscriptions(telegramId: string): Promise<SubscriptionCheck> {
+  // Один упорядоченный список (порядок задаёт index в конфиге) — и для проверки, и для ответа.
+  const channels = orderedChannels();
+
+  return CHANNEL_CHECK_MODE === "join_request"
+    ? checkJoinRequests(telegramId, channels)
+    : checkRealSubscriptions(telegramId, channels);
 }
 
 /**

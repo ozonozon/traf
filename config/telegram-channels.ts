@@ -1,7 +1,12 @@
 /**
  * Каналы обязательного задания «Подписка на Telegram-каналы».
  *
- * ЭТО ЕДИНСТВЕННОЕ МЕСТО, где задаются каналы и их идентификаторы.
+ * ЭТО ЕДИНСТВЕННОЕ МЕСТО, где задаются каналы, их идентификаторы И ИХ ПОРЯДОК.
+ *
+ * Порядок в задании задаёт только поле `index` (1 → 2 → 3). Массив ниже уже отсортирован,
+ * но API берёт каналы через `orderedChannels()` и сортирует их по `index`, а интерфейс
+ * не сортирует каналы сам — он рисует список в том порядке, в котором он пришёл с сервера.
+ * Поэтому менять порядок нужно здесь, а не в компонентах.
  *
  * Подписка проверяется сервером через Telegram Bot API `getChatMember`:
  *   chat_id = chatId канала, user_id = telegram_id авторизованного пользователя.
@@ -11,6 +16,8 @@
  * для приватных каналов и каналов без публичного username — обязательно администратором,
  * иначе Telegram отвечает «chat not found» и проверка вернёт понятную ошибку.
  */
+
+import type { ChannelCheckMode } from "@/lib/types";
 
 /** Номер канала: совпадает с полями channel1Subscribed…channel3Subscribed в состоянии. */
 export type TelegramChannelIndex = 1 | 2 | 3;
@@ -63,6 +70,26 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
     chatId: "-1004398133122",
   },
 ];
+
+/**
+ * РЕЖИМ проверки обязательного задания (один переключатель, меняется только здесь):
+ *
+ *  - "subscription" — текущая РАБОЧАЯ механика: сервер вызывает Telegram Bot API
+ *                     getChatMember и считает подпиской member / administrator /
+ *                     creator / restricted.
+ *
+ *  - "join_request" — ЭКСПЕРИМЕНТ: считаем не подписку, а отправленную заявку на вступление
+ *                     в закрытый канал. Telegram присылает нашему webhook update
+ *                     chat_join_request, он пишется в таблицу channel_requests
+ *                     (см. app/api/telegram/webhook/route.ts), а Mini App читает её через
+ *                     /api/channel-subscriptions. getChatMember в этом режиме не вызывается.
+ *
+ * Механики не смешиваются: в один момент времени работает ровно одна.
+ */
+export const CHANNEL_CHECK_MODE: ChannelCheckMode = "subscription";
+
+/** Режим проверки (для типов API/UI). */
+export type { ChannelCheckMode };
 
 /**
  * ЕДИНСТВЕННЫЙ источник порядка каналов: поле `index` (1 → 2 → 3).

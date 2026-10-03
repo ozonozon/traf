@@ -151,14 +151,25 @@ export interface LeaderboardResponseDto {
   currentUser: LeaderboardCurrentUserDto | null;
 }
 
-/** Ответ GET /api/channel-subscriptions — фактическая подписка на обязательные каналы. */
+/**
+ * Режим проверки обязательного задания «Подписка на каналы».
+ * Задаётся одним переключателем CHANNEL_CHECK_MODE в config/telegram-channels.ts:
+ *  - "subscription" — фактическая подписка (Telegram Bot API getChatMember);
+ *  - "join_request" — отправленная заявка на вступление (update chat_join_request → channel_requests).
+ */
+export type ChannelCheckMode = "subscription" | "join_request";
+
+/** Ответ GET /api/channel-subscriptions — результат проверки обязательных каналов. */
 export interface ChannelSubscriptionDto {
   id: string;
   index: 1 | 2 | 3;
   title: string;
   description: string;
   inviteLink: string;
-  /** true — Telegram Bot API подтвердил подписку (member / administrator / creator). */
+  /**
+   * В режиме "subscription" — Bot API подтвердил подписку (member / administrator / creator).
+   * В режиме "join_request" — от пользователя пришла заявка на вступление (chat_join_request).
+   */
   subscribed: boolean;
 }
 
@@ -167,6 +178,8 @@ export interface ChannelSubscriptionsResponseDto {
   subscribedCount: number;
   total: number;
   allSubscribed: boolean;
+  /** Активный режим: от него зависят подписи в интерфейсе. */
+  mode: ChannelCheckMode;
 }
 
 /** Ответ GET /api/channel-requests (legacy: заявки chat_join_request). */

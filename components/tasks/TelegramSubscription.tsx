@@ -8,7 +8,13 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { isApiError } from "@/lib/api";
 import { hapticNotification, hapticSelection, openTelegramChannelLink } from "@/lib/telegram";
-import type { ChannelSubscriptionsResponseDto, SubmissionResponseDto, TaskChannelDto, TaskDetailDto } from "@/lib/types";
+import type {
+  ChannelCheckMode,
+  ChannelSubscriptionsResponseDto,
+  SubmissionResponseDto,
+  TaskChannelDto,
+  TaskDetailDto,
+} from "@/lib/types";
 import { cn, formatRub, getErrorMessage } from "@/lib/utils";
 
 import { TaskSuccess } from "./TaskSuccess";
@@ -37,12 +43,18 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
     task.state === "completed" ? (task.submission?.reward ?? task.reward) : null,
   );
   const [isFresh, setIsFresh] = useState(false);
+  // Режим проверки приходит с сервера (config/telegram-channels.ts → CHANNEL_CHECK_MODE):
+  // "subscription" — подписка на канал, "join_request" — заявка на вступление.
+  const [mode, setMode] = useState<ChannelCheckMode>("subscription");
+
+  const isJoinRequestMode = mode === "join_request";
 
   const subscribedCount = channels.filter((channel) => channel.subscribed).length;
   const allSubscribed = channels.length > 0 && subscribedCount === channels.length;
 
   /** Переносит подтверждённые подписки из ответа сервера в состояние карточек. */
   function applySubscriptions(response: ChannelSubscriptionsResponseDto) {
+    if (response.mode === "subscription" || response.mode === "join_request") setMode(response.mode);
     setChannels((current) =>
       current.map((channel) => {
         const fresh = response.channels.find((item) => item.id === channel.id);
@@ -59,13 +71,20 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   }
 
   // Возврат в Mini App после канала: обновляем статусы повторным запросом (без тостов).
+  // Первый запрос — сразу при открытии задания: он же сообщает активный режим проверки.
   // authedFetch — тот же путь, что у /api/profile: при 401 повторяет вход и повторяет запрос.
   useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState !== "visible") return;
+    const refresh = () => {
       authedFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions")
         .then((response) => applySubscriptions(response))
         .catch(() => undefined);
+    };
+
+    refresh();
+
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      refresh();
     };
 
     document.addEventListener("visibilitychange", onVisible);
@@ -83,11 +102,17 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
       const response = await authedFetch<ChannelSubscriptionsResponseDto>("/api/channel-subscriptions");
       applySubscriptions(response);
       setHasChecked(true);
+      // Подписи берём из ответа: режим мог переключиться на сервере.
+      const joinMode = (response.mode ?? mode) === "join_request";
       hapticNotification(response.allSubscribed ? "success" : "warning");
-      toast.show(`Подписки: ${response.subscribedCount} из ${response.total}`, {
+      toast.show(`${joinMode ? "Заявки" : "Подписки"}: ${response.subscribedCount} из ${response.total}`, {
         description: response.allSubscribed
-          ? "Все подписки подтверждены — задание можно завершить"
-          : "Подпишитесь на каналы выше и проверьте ещё раз",
+          ? joinMode
+            ? "Все заявки отправлены — задание можно завершить"
+            : "Все подписки подтверждены — задание можно завершить"
+          : joinMode
+            ? "Отправьте заявки на каналы выше и проверьте ещё раз"
+            : "Подпишитесь на каналы выше и проверьте ещё раз",
         variant: response.allSubscribed ? "success" : "default",
       });
     } catch (cause) {
@@ -186,8 +211,9 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
   return (
     <div className="space-y-3.5">
       <p className="px-1 text-[13px] leading-snug text-muted">
-        Подпишись на все {channels.length} канала — у каждого своя кнопка «ПОДПИСАТЬСЯ». Когда подписки будут
-        оформлены, нажми «ПРОВЕРИТЬ ПОДПИСКУ».
+        {isJoinRequestMode
+          ? `Отправь заявку на вступление в ${channels.length} закрытых канала — у каждого своя кнопка «ПОДПИСАТЬСЯ». Когда заявки будут отправлены, нажми «ПРОВЕРИТЬ ЗАЯВКИ».`
+          : `Подпишись на все ${channels.length} канала — у каждого своя кнопка «ПОДПИСАТЬСЯ». Когда подписки будут оформлены, нажми «ПРОВЕРИТЬ ПОДПИСКУ».`}
       </p>
 
       {channels.map((channel, index) => {
@@ -218,7 +244,17 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
               )}
             >
               {isSubscribed ? <Check size={14} strokeWidth={3} /> : <Clock size={13} />}
-              {isSubscribed ? "Подписка подтверждена" : hasChecked ? "Не подписан" : "Подписка не проверена"}
+              {isSubscribed
+                ? isJoinRequestMode
+                  ? "Заявка отправлена"
+                  : "Подписка подтверждена"
+                : hasChecked
+                  ? isJoinRequestMode
+                    ? "Заявка не отправлена"
+                    : "Не подписан"
+                  : isJoinRequestMode
+                    ? "Заявка не проверена"
+                    : "Подписка не проверена"}
             </p>
 
             <Button
@@ -235,22 +271,25 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
 
       <section className="card-surface p-4">
         <p className="text-[15.5px] font-bold">
-          Подписки: {subscribedCount} из {channels.length}
+          {isJoinRequestMode ? "Заявки" : "Подписки"}: {subscribedCount} из {channels.length}
         </p>
 
         {allSubscribed ? (
           <p className="mt-2 flex items-center gap-1.5 text-[13px] font-semibold text-success">
             <Check size={15} strokeWidth={3} />
-            Все подписки подтверждены
+            {isJoinRequestMode ? "Заявки по всем каналам отправлены" : "Все подписки подтверждены"}
           </p>
         ) : hasChecked ? (
           <p className="mt-2 text-[13px] leading-snug text-muted">
-            Telegram подтвердил {subscribedCount} из {channels.length}. Подпишитесь на остальные каналы и нажмите
-            «ПРОВЕРИТЬ ПОДПИСКУ» ещё раз.
+            {isJoinRequestMode
+              ? `Telegram получил ${subscribedCount} из ${channels.length} заявок. Отправьте заявки на остальные каналы и нажмите «ПРОВЕРИТЬ ЗАЯВКИ» ещё раз.`
+              : `Telegram подтвердил ${subscribedCount} из ${channels.length}. Подпишитесь на остальные каналы и нажмите «ПРОВЕРИТЬ ПОДПИСКУ» ещё раз.`}
           </p>
         ) : (
           <p className="mt-2 text-[13px] leading-snug text-muted">
-            Подписка засчитывается только по данным Telegram — после нажатия «ПРОВЕРИТЬ ПОДПИСКУ».
+            {isJoinRequestMode
+              ? "Заявка засчитывается только по данным Telegram — после нажатия «ПРОВЕРИТЬ ЗАЯВКИ»."
+              : "Подписка засчитывается только по данным Telegram — после нажатия «ПРОВЕРИТЬ ПОДПИСКУ»."}
           </p>
         )}
       </section>
@@ -263,7 +302,7 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
         ) : (
           <Button variant="primary" onClick={handleCheck} isLoading={isChecking}>
             {isChecking ? null : <RefreshCw size={17} />}
-            ПРОВЕРИТЬ ПОДПИСКУ
+            {isJoinRequestMode ? "ПРОВЕРИТЬ ЗАЯВКИ" : "ПРОВЕРИТЬ ПОДПИСКУ"}
           </Button>
         )}
       </div>

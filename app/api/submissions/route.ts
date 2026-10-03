@@ -47,9 +47,9 @@ export async function POST(request: NextRequest) {
 
     const isSubscriptionTask = task.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE;
 
-    // Обязательное задание: сервер САМ проверяет подписку через Telegram Bot API
-    // (getChatMember) непосредственно перед начислением. Клиенту здесь не доверяем:
-    // никакие allSubscribed/флаги из тела запроса не принимаются во внимание.
+    // Обязательное задание: сервер САМ проверяет каналы непосредственно перед начислением
+    // (getChatMember в режиме "subscription", channel_requests в режиме "join_request").
+    // Клиенту здесь не доверяем: никакие allSubscribed/флаги из тела запроса не принимаются во внимание.
     if (isSubscriptionTask) {
       const check = await checkChannelSubscriptions(user.telegram_id);
       assertChannelsCheckable(check);
@@ -57,7 +57,9 @@ export async function POST(request: NextRequest) {
       if (!check.allSubscribed) {
         throw new RouteError(
           "SUBSCRIPTIONS_INCOMPLETE",
-          `Подписка подтверждена не по всем каналам (${check.subscribedCount} из ${check.total})`,
+          check.mode === "join_request"
+            ? `Заявка на вступление отправлена не по всем каналам (${check.subscribedCount} из ${check.total})`
+            : `Подписка подтверждена не по всем каналам (${check.subscribedCount} из ${check.total})`,
           409,
         );
       }
