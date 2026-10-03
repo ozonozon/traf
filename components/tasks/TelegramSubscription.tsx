@@ -97,13 +97,25 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
       const status = isApiError(cause) ? cause.status : 0;
       const code = isApiError(cause) ? cause.code : "REQUEST_FAILED";
       const message = isApiError(cause) ? cause.message : getErrorMessage(code);
-      const reason =
-        isApiError(cause) && cause.details && typeof cause.details === "object" && "reason" in cause.details
-          ? String((cause.details as { reason?: unknown }).reason)
+      const details =
+        isApiError(cause) && cause.details && typeof cause.details === "object"
+          ? (cause.details as Record<string, unknown>)
           : null;
-      console.error("[subscriptions] проверка подписки не удалась", { status, code, reason, message });
+      const reason = details && typeof details.reason === "string" ? details.reason : null;
+      const ageSeconds = details && typeof details.ageSeconds === "number" ? details.ageSeconds : null;
+      const hashMatches = details && typeof details.hashMatches === "boolean" ? details.hashMatches : null;
+      console.error("[subscriptions] проверка подписки не удалась", { status, code, reason, ageSeconds, hashMatches, message });
       toast.show(`Ошибка проверки подписки: HTTP ${status}`, {
-        description: reason ? `CODE: ${code} · REASON: ${reason}` : `CODE: ${code} · ${message}`,
+        description:
+          [
+            `CODE: ${code}`,
+            reason && `REASON: ${reason}`,
+            hashMatches === false && "HASH: не совпал",
+            hashMatches === true && "HASH: совпал",
+            ageSeconds !== null && `age: ${Math.round(ageSeconds / 60)} мин`,
+          ]
+            .filter(Boolean)
+            .join(" · ") || message,
         variant: "error",
       });
     } finally {
