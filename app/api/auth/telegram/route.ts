@@ -36,7 +36,11 @@ export async function POST(request: NextRequest) {
     if (initData && botToken) {
       const verification = validateTelegramInitData(initData, botToken);
       if (!verification.valid || !verification.user) {
-        throw new RouteError("INVALID_INIT_DATA", "Не удалось проверить данные Telegram", 401);
+        console.warn("[telegram-auth] POST /api/auth/telegram: initData не принят", verification.reason);
+        throw new RouteError("INVALID_INIT_DATA", "Не удалось проверить данные Telegram", 401, undefined, {
+          reason: verification.reason ?? "INVALID_INIT_DATA",
+          diagnostics: verification.diagnostics,
+        });
       }
       const user = await signInWithTelegram(verification.user);
       return jsonOk({ user: toPublicUser(user), mode: "telegram" });

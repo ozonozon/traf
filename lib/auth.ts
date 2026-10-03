@@ -19,52 +19,129 @@ export function isDemoAllowed(): boolean {
 }
 
 /**
- * Проверка подписи Telegram initData.
- *
- * secret = HMAC_SHA256(key="WebAppData", message=botToken)
- * hash   = HMAC_SHA256(key=secret, message=dataCheckString)
- * dataCheckString — все поля кроме hash/signature, отсортированные по ключу.
+ * Результат проверки initData. Возвращаются только безопасные факты:
+ * длины, имена полей, возраст auth_date — без значений initData, токена и user.
  */
-export function validateTelegramInitData(
-  initData: string,
-  botToken: string,
-): { valid: boolean; user?: TelegramUser; authDate?: Date } {
-  if (!initData || !botToken) return { valid: false };
+export interface InitDataDiagnostics {
+  initDataPresent: boolean;
+  initDataLength: number;
+  hashPresent: boolean;
+  hashLength: number;
+  computedHashLength: number;
+  hashMatch: boolean;
+  userPresent: boolean;
+  authDatePresent: boolean;
+  authDate: number | null;
+  authAgeSeconds: number | null;
+  botTokenConfigured: boolean;
+  fields: string[];
+}
 
-  const params = new URLSearchParams(initData);
-  const hash = params.get("hash");
-  if (!hash) return { valid: false };
+export type InitDataFailure =
+  | "INIT_DATA_MISSING"
+  | "BOT_TOKEN_MISSING"
+  | "HASH_MISSING"
+  | "HASH_MISMATCH"
+  | "AUTH_DATE_MISSING"
+  | "AUTH_DATE_EXPIRED"
+  | "USER_INVALID";
+
+export interface InitDataVerification {
+  valid: boolean;
+  /** Причина отказа (null при valid: true). */
+  reason: InitDataFailure | null;
+  user?: TelegramUser;
+  authDate?: Date;
+  diagnostics: InitDataDiagnostics;
+}
+
+/**
+ * Проверка Telegram initData строго по официальной схеме
+ * (https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app):
+ *
+ *  1. берём RAW-строку initData (без повторного кодирования/декодирования);
+ *  2. парсим её как query-строку;
+ *  3. достаём hash;
+ *  4. исключаем hash (и signature) из набора полей;
+ *  5. сортируем оставшиеся поля по имени;
+ *  6. собираем data_check_string как "key=value" через "\n";
+ *  7. secret_key = HMAC_SHA256(key="WebAppData", message=botToken);
+ *  8. hash = HMAC_SHA256(key=secret_key, message=data_check_string);
+ *  9. сравниваем с полученным hash безопасным способом;
+ * 10. проверяем auth_date (initData старше 24 часов не принимается);
+ * 11. из поля user берём telegram id.
+ *
+ * Значения, которые сюда приходят, никогда не логируются.
+ */
+export function validateTelegramInitData(initData: string, botToken: string): InitDataVerification {
+  const raw = typeof initData === "string" ? initData : "";
+  const params = new URLSearchParams(raw);
+  const hash = params.get("hash") ?? "";
+  const authDateRaw = Number(params.get("auth_date") ?? 0);
+  const authAgeSeconds = authDateRaw ? Math.floor(Date.now() / 1000) - authDateRaw : null;
 
   const dataCheckString = [...params.entries()]
     .filter(([key]) => key !== "hash" && key !== "signature")
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([key, value]) => `${key}=${value}`)
     .join("\n");
 
   const secretKey = crypto.createHmac("sha256", "WebAppData").update(botToken).digest();
-  const computed = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+  const computedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
 
-  const computedBuffer = Buffer.from(computed, "utf8");
+  const computedBuffer = Buffer.from(computedHash, "utf8");
   const receivedBuffer = Buffer.from(hash, "utf8");
-  if (computedBuffer.length !== receivedBuffer.length) return { valid: false };
-  if (!crypto.timingSafeEqual(computedBuffer, receivedBuffer)) return { valid: false };
-
-  const authDateSeconds = Number(params.get("auth_date") ?? 0);
-  if (!authDateSeconds) return { valid: false };
-  const ageSeconds = Math.floor(Date.now() / 1000) - authDateSeconds;
-  if (ageSeconds > INIT_DATA_MAX_AGE_SECONDS) return { valid: false };
+  const hashMatch =
+    Boolean(hash) && computedBuffer.length === receivedBuffer.length && crypto.timingSafeEqual(computedBuffer, receivedBuffer);
 
   const rawUser = params.get("user");
   let user: TelegramUser | undefined;
+  let userValid = Boolean(rawUser);
   if (rawUser) {
     try {
       user = JSON.parse(rawUser) as TelegramUser;
+      userValid = typeof user?.id === "number";
     } catch {
-      return { valid: false };
+      user = undefined;
+      userValid = false;
     }
   }
 
-  return { valid: true, user, authDate: new Date(authDateSeconds * 1000) };
+  const diagnostics: InitDataDiagnostics = {
+    initDataPresent: raw.length > 0,
+    initDataLength: raw.length,
+    hashPresent: Boolean(hash),
+    hashLength: hash.length,
+    computedHashLength: computedHash.length,
+    hashMatch,
+    userPresent: Boolean(rawUser),
+    authDatePresent: Boolean(authDateRaw),
+    authDate: authDateRaw || null,
+    authAgeSeconds,
+    botTokenConfigured: Boolean(botToken),
+    fields: [...params.keys()],
+  };
+
+  const fail = (reason: InitDataFailure): InitDataVerification => {
+    console.warn(`[telegram-auth] initData отклонён: ${reason}`, {
+      ...diagnostics,
+      hint:
+        reason === "HASH_MISMATCH"
+          ? "hash не совпал: проверьте, что TELEGRAM_BOT_TOKEN принадлежит тому же боту, который открывает Mini App"
+          : undefined,
+    });
+    return { valid: false, reason, diagnostics };
+  };
+
+  if (!raw) return fail("INIT_DATA_MISSING");
+  if (!botToken) return fail("BOT_TOKEN_MISSING");
+  if (!hash) return fail("HASH_MISSING");
+  if (!hashMatch) return fail("HASH_MISMATCH");
+  if (!authDateRaw) return fail("AUTH_DATE_MISSING");
+  if (authAgeSeconds !== null && authAgeSeconds > INIT_DATA_MAX_AGE_SECONDS) return fail("AUTH_DATE_EXPIRED");
+  if (!userValid) return fail("USER_INVALID");
+
+  return { valid: true, reason: null, user, authDate: new Date(authDateRaw * 1000), diagnostics };
 }
 
 // --- Публичное представление пользователя -----------------------------------
