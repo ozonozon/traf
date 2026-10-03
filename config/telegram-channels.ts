@@ -44,8 +44,7 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
     title: "Канал с заданиями",
     description: "Новые задания и выплаты каждый день",
     inviteLink: "https://t.me/+MWJ1dz5nuf4zMjcx",
-    // TODO: подставьте chat_id канала: -100… или @username
-    chatId: "",
+    chatId: "-1004218822912",
   },
   {
     index: 2,
@@ -53,8 +52,7 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
     title: "Канал с выплатами",
     description: "Новости платформы и розыгрыши",
     inviteLink: "https://t.me/+nJs69Y_Xpm5hMDU5",
-    // TODO: подставьте chat_id канала: -100… или @username
-    chatId: "",
+    chatId: "-1003929038199",
   },
   {
     index: 3,
@@ -62,8 +60,7 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
     title: "Канал поддержки",
     description: "Ответы на вопросы и помощь",
     inviteLink: "https://t.me/+0o4yDY6AODI3OTQx",
-    // TODO: подставьте chat_id канала: -100… или @username
-    chatId: "",
+    chatId: "-1004398133122",
   },
 ];
 

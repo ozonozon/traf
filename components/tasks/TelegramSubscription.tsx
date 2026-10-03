@@ -92,9 +92,13 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
       });
     } catch (cause) {
       hapticNotification("error");
+      // ВРЕМЕННАЯ ДИАГНОСТИКА: HTTP-статус, код и текст ошибки (без секретов, cookies и initData).
+      const status = isApiError(cause) ? cause.status : 0;
       const code = isApiError(cause) ? cause.code : "REQUEST_FAILED";
-      toast.show("Не удалось проверить подписку", {
-        description: isApiError(cause) ? cause.message : getErrorMessage(code),
+      const message = isApiError(cause) ? cause.message : getErrorMessage(code);
+      console.error("[subscriptions] проверка подписки не удалась", { status, code, message });
+      toast.show(`Ошибка проверки подписки: HTTP ${status}`, {
+        description: `CODE: ${code} · ${message}`,
         variant: "error",
       });
     } finally {
@@ -121,9 +125,12 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
       });
     } catch (cause) {
       const code = isApiError(cause) ? cause.code : "REQUEST_FAILED";
+      const status = isApiError(cause) ? cause.status : 0;
       hapticNotification("error");
-      toast.show("Не удалось выполнить задание", {
-        description: isApiError(cause) ? cause.message : getErrorMessage(code),
+      // ВРЕМЕННАЯ ДИАГНОСТИКА: HTTP-статус, код и текст ошибки (без секретов).
+      console.error("[subscriptions] получение награды не удалось", { status, code });
+      toast.show(`Не удалось выполнить задание: HTTP ${status}`, {
+        description: `CODE: ${code} · ${isApiError(cause) ? cause.message : getErrorMessage(code)}`,
         variant: "error",
       });
       if (code === "TASK_ALREADY_COMPLETED") {

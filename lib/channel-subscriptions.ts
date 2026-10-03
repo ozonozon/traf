@@ -27,6 +27,8 @@ export interface SubscriptionCheck {
 export async function checkChannelSubscriptions(telegramId: string): Promise<SubscriptionCheck> {
   const channels = publicChannels();
 
+  // chat_id для getChatMember берётся только из серверного конфига (config/telegram-channels.ts).
+  // Пустой chatId — ошибка настройки: канал считается непроверенным (CHAT_ID_MISSING в lib/telegram-bot.ts).
   const checks = await Promise.all(
     TELEGRAM_CHANNELS.map((channel) => getChatMemberStatus(channel.chatId, telegramId)),
   );
