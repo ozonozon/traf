@@ -101,17 +101,37 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
         isApiError(cause) && cause.details && typeof cause.details === "object"
           ? (cause.details as Record<string, unknown>)
           : null;
+      // Для 401 подпись деталей даёт diagnostics (валидатор), для остальных ошибок — сам объект.
+      const diagnostics =
+        details && details.diagnostics && typeof details.diagnostics === "object"
+          ? (details.diagnostics as Record<string, unknown>)
+          : details;
       const reason = details && typeof details.reason === "string" ? details.reason : null;
-      const ageSeconds = details && typeof details.ageSeconds === "number" ? details.ageSeconds : null;
-      const hashMatches = details && typeof details.hashMatches === "boolean" ? details.hashMatches : null;
-      console.error("[subscriptions] проверка подписки не удалась", { status, code, reason, ageSeconds, hashMatches, message });
+      const ageSeconds = diagnostics && typeof diagnostics.authAgeSeconds === "number" ? diagnostics.authAgeSeconds : null;
+      const hashMatch = diagnostics && typeof diagnostics.hashMatch === "boolean" ? diagnostics.hashMatch : null;
+      const botUsername = details && typeof details.botUsername === "string" ? details.botUsername : null;
+      const botTokenValid = details && typeof details.botTokenValid === "boolean" ? details.botTokenValid : null;
+
+      console.error("[subscriptions] проверка подписки не удалась", {
+        status,
+        code,
+        reason,
+        hashMatch,
+        ageSeconds,
+        botUsername,
+        botTokenValid,
+        message,
+      });
+
       toast.show(`Ошибка проверки подписки: HTTP ${status}`, {
         description:
           [
             `CODE: ${code}`,
             reason && `REASON: ${reason}`,
-            hashMatches === false && "HASH: не совпал",
-            hashMatches === true && "HASH: совпал",
+            hashMatch === false && "HASH: не совпал",
+            hashMatch === true && "HASH: совпал",
+            botTokenValid === false && "BOT: токен не от Telegram",
+            botUsername && `BOT: @${botUsername}`,
             ageSeconds !== null && `age: ${Math.round(ageSeconds / 60)} мин`,
           ]
             .filter(Boolean)
