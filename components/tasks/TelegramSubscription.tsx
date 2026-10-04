@@ -91,51 +91,12 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
         variant: response.allSubscribed ? "success" : "default",
       });
     } catch (cause) {
-      hapticNotification("error");
-      // ВРЕМЕННАЯ ДИАГНОСТИКА: HTTP-статус, код, причина отказа авторизации и текст ошибки.
-      // Значения initData, cookie и токена не показываются.
-      const status = isApiError(cause) ? cause.status : 0;
       const code = isApiError(cause) ? cause.code : "REQUEST_FAILED";
       const message = isApiError(cause) ? cause.message : getErrorMessage(code);
-      const details =
-        isApiError(cause) && cause.details && typeof cause.details === "object"
-          ? (cause.details as Record<string, unknown>)
-          : null;
-      // Для 401 подпись деталей даёт diagnostics (валидатор), для остальных ошибок — сам объект.
-      const diagnostics =
-        details && details.diagnostics && typeof details.diagnostics === "object"
-          ? (details.diagnostics as Record<string, unknown>)
-          : details;
-      const reason = details && typeof details.reason === "string" ? details.reason : null;
-      const ageSeconds = diagnostics && typeof diagnostics.authAgeSeconds === "number" ? diagnostics.authAgeSeconds : null;
-      const hashMatch = diagnostics && typeof diagnostics.hashMatch === "boolean" ? diagnostics.hashMatch : null;
-      const botUsername = details && typeof details.botUsername === "string" ? details.botUsername : null;
-      const botTokenValid = details && typeof details.botTokenValid === "boolean" ? details.botTokenValid : null;
-
-      console.error("[subscriptions] проверка подписки не удалась", {
-        status,
-        code,
-        reason,
-        hashMatch,
-        ageSeconds,
-        botUsername,
-        botTokenValid,
-        message,
-      });
-
-      toast.show(`Ошибка проверки подписки: HTTP ${status}`, {
-        description:
-          [
-            `CODE: ${code}`,
-            reason && `REASON: ${reason}`,
-            hashMatch === false && "HASH: не совпал",
-            hashMatch === true && "HASH: совпал",
-            botTokenValid === false && "BOT: токен не от Telegram",
-            botUsername && `BOT: @${botUsername}`,
-            ageSeconds !== null && `age: ${Math.round(ageSeconds / 60)} мин`,
-          ]
-            .filter(Boolean)
-            .join(" · ") || message,
+      hapticNotification("error");
+      console.error("[subscriptions] проверка подписки не удалась", { code });
+      toast.show("Не удалось проверить подписку", {
+        description: message,
         variant: "error",
       });
     } finally {
@@ -162,12 +123,11 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
       });
     } catch (cause) {
       const code = isApiError(cause) ? cause.code : "REQUEST_FAILED";
-      const status = isApiError(cause) ? cause.status : 0;
+      const message = isApiError(cause) ? cause.message : getErrorMessage(code);
       hapticNotification("error");
-      // ВРЕМЕННАЯ ДИАГНОСТИКА: HTTP-статус, код и текст ошибки (без секретов).
-      console.error("[subscriptions] получение награды не удалось", { status, code });
-      toast.show(`Не удалось выполнить задание: HTTP ${status}`, {
-        description: `CODE: ${code} · ${isApiError(cause) ? cause.message : getErrorMessage(code)}`,
+      console.error("[subscriptions] получение награды не удалось", { code });
+      toast.show("Не удалось выполнить задание", {
+        description: message,
         variant: "error",
       });
       if (code === "TASK_ALREADY_COMPLETED") {

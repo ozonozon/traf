@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import type { NextRequest } from "next/server";
 
 import { getUserFromInitData, toPublicUser } from "@/lib/auth";
-import { getRequestedChannelIds, query } from "@/lib/db";
+import { query } from "@/lib/db";
 import { getTelegramBotToken } from "@/lib/env";
 import { jsonOk } from "@/lib/http";
 import { SESSION_COOKIE } from "@/lib/session";
@@ -67,8 +67,7 @@ export async function GET(request: NextRequest) {
 
 /**
  * Как авторизован текущий запрос: есть ли session cookie, есть ли initData,
- * какой telegram_id получился и сколько у него заявок. Без секретов — только
- * данные самого вызывающего.
+ * какой telegram_id получился. Без секретов — только данные самого вызывающего.
  */
 async function describeRequestAuth() {
   const requestHeaders = await headers();
@@ -83,13 +82,9 @@ async function describeRequestAuth() {
       cookie: hasCookie ? "present" : "absent",
       telegramId: null,
       userInDb: false,
-      channelRequests: 0,
-      requestedChannelIds: [] as string[],
       note: "запрос без валидного Telegram initData и без подходящей cookie",
     };
   }
-
-  const requestedChannelIds = await getRequestedChannelIds(user.telegram_id);
 
   return {
     initDataHeader: "valid",
@@ -97,8 +92,6 @@ async function describeRequestAuth() {
     telegramId: user.telegram_id,
     userInDb: true,
     user: toPublicUser(user),
-    channelRequests: requestedChannelIds.length,
-    requestedChannelIds,
   };
 }
 

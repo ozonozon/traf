@@ -75,37 +75,3 @@ export function publicChannels(channels: TelegramChannelConfig[] = TELEGRAM_CHAN
   }));
 }
 
-/** Приводит ссылку к сравнимому виду: без схемы, домена, ведущего «+» и слэшей. */
-function normalizeInvite(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/^t\.me\//, "")
-    .replace(/^\+/, "")
-    .replace(/\/+$/, "");
-}
-
-/**
- * Определяет канал по данным заявки из Telegram (legacy chat_join_request).
- * Оставлено для обратной совместимости webhook; новая проверка подписки
- * (getChatMember) использует `chatId` из этого же конфига.
- */
-export function findChannelByInvite(
-  inviteLink?: string | null,
-  chatId?: number | string | null,
-): TelegramChannelConfig | null {
-  if (inviteLink) {
-    const normalized = normalizeInvite(inviteLink);
-    const byLink = TELEGRAM_CHANNELS.find((channel) => normalizeInvite(channel.inviteLink) === normalized);
-    if (byLink) return byLink;
-  }
-
-  if (chatId !== undefined && chatId !== null) {
-    const idText = String(chatId);
-    return TELEGRAM_CHANNELS.find((channel) => channel.chatId !== "" && String(channel.chatId) === idText) ?? null;
-  }
-
-  return null;
-}
-

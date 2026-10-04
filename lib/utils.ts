@@ -117,17 +117,13 @@ const ERROR_MESSAGES: Record<string, string> = {
   TASK_ALREADY_COMPLETED: "Вы уже выполняли это задание",
   SUBSCRIPTIONS_INCOMPLETE: "Подписка подтверждена не по всем каналам",
   TELEGRAM_CHANNEL_CHECK_FAILED: "Не удалось проверить подписку. Попробуйте позже",
-  JOIN_REQUESTS_INCOMPLETE: "Ожидаем подтверждение заявок от Telegram",
   TASKS_LOCKED: "Сначала выполните обязательное задание «Подписка на Telegram-каналы»",
-  INVALID_TICKET: "Ссылка подтверждения недействительна",
-  TICKET_FOR_OTHER_USER: "Эта заявка относится к другому пользователю",
   TEXT_TOO_SHORT: "Ответ слишком короткий",
   RATING_REQUIRED: "Выберите оценку",
   INVALID_OPTION: "Некорректный вариант ответа",
   VALIDATION_ERROR: "Проверьте заполненные поля",
   NOT_FOUND: "Данные не найдены",
   REQUEST_FAILED: "Не удалось выполнить запрос",
-  ADMIN_DISABLED: "Админ-доступ не настроен",
   FORBIDDEN: "Недостаточно прав",
 };
 

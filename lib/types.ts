@@ -169,14 +169,6 @@ export interface ChannelSubscriptionsResponseDto {
   allSubscribed: boolean;
 }
 
-/** Ответ GET /api/channel-requests (legacy: заявки chat_join_request). */
-export interface ChannelRequestsResponseDto {
-  channels: Array<{ id: string; index: 1 | 2 | 3; title: string; requested: boolean }>;
-  requestedCount: number;
-  total: number;
-  allRequested: boolean;
-}
-
 export interface StatsResponseDto {
   participantsCount: number;
   minimumReward: number;

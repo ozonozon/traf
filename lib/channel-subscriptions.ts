@@ -10,10 +10,10 @@ import type { ChannelSubscriptionDto } from "./types";
  * Проверка ФАКТИЧЕСКОЙ подписки пользователя на обязательные Telegram-каналы.
  *
  * Единственный источник правды — Telegram Bot API `getChatMember` для каждого канала
- * из config/telegram-channels.ts. Никаких заявок (chat_join_request), тикетов и
- * сохранённых состояний: результат проверки нигде не кэшируется.
+ * из config/telegram-channels.ts. Никаких тикетов и сохранённых состояний:
+ * результат проверки нигде не кэшируется.
  *
- * if Telegram ответил ошибкой — канал НЕ считается подписанным.
+ * Если Telegram ответил ошибкой — канал НЕ считается подписанным.
  */
 export interface SubscriptionCheck {
   channels: ChannelSubscriptionDto[];

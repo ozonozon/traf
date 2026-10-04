@@ -248,37 +248,6 @@ export async function getProfileStats(telegramId: string): Promise<{
   };
 }
 
-// --- Заявки на вступление в каналы -------------------------------------------
-
-/**
- * Записывает заявку, полученную Telegram (chat_join_request).
- * Повторная заявка по тому же каналу ничего не меняет: UNIQUE(telegram_id, channel_id).
- */
-export async function addChannelRequest(input: {
-  telegramId: string;
-  channelId: string;
-  inviteLink: string | null;
-}): Promise<boolean> {
-  const rows = await query<{ id: number }>(
-    `INSERT INTO channel_requests (telegram_id, channel_id, invite_link)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (telegram_id, channel_id) DO NOTHING
-     RETURNING id`,
-    [input.telegramId, input.channelId, input.inviteLink],
-  );
-
-  return rows.length > 0;
-}
-
-/** id каналов, по которым пользователь уже отправил заявку. */
-export async function getRequestedChannelIds(telegramId: string): Promise<string[]> {
-  const rows = await query<{ channel_id: string }>(
-    `SELECT channel_id FROM channel_requests WHERE telegram_id = $1`,
-    [telegramId],
-  );
-  return rows.map((row) => row.channel_id);
-}
-
 // --- Выполненные задания -----------------------------------------------------
 
 export async function getCompletedTaskIds(telegramId: string): Promise<string[]> {

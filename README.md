@@ -15,7 +15,7 @@
 | Что | Где хранится |
 | --- | --- |
 | Пользователи (профиль, баланс, заработок, число заданий) | таблица `users`, `telegram_id` уникален |
-| Заявки на вступление в каналы | таблица `channel_requests`, `UNIQUE(telegram_id, channel_id)` |
+| (устаревшая таблица) | `channel_requests` — приложением не используется, осталась в схеме БД |
 | Выполненные задания | таблица `task_completions`, `UNIQUE(telegram_id, task_id)` |
 | История виртуальных операций | таблица `transactions` |
 | Сессия Mini App | подписанная httpOnly-cookie (`voxy_state`) только с telegram id |
@@ -96,7 +96,7 @@ npm run dev
 
 Заголовок важнее cookie: Telegram Web/Desktop открывает Mini App в iframe, и браузер может
 не сохранить стороннюю cookie, а cookie из прошлой сессии может относиться к другому аккаунту.
-Поэтому `/api/profile`, `/api/channel-requests`, `/api/transactions` и остальные защищённые
+Поэтому `/api/profile`, `/api/transactions`, `/api/channel-subscriptions` и остальные защищённые
 роуты авторизуются одинаково и работают даже без cookie. Без обоих источников — `401`.
 
 ### Порядок авторизации (нельзя нарушать)
@@ -112,7 +112,7 @@ npm run dev
    `null`-URL, пока идёт вход, поэтому запросы не уходят раньше, чем сервер поставил
    session cookie. Если вход завершился ошибкой, запрос всё равно выполняется один раз:
    `/api/tasks`, `/api/stats`, `/api/leaderboard` отдают данные без сессии, а
-   `/api/channel-requests`, `/api/profile`, `/api/transactions` возвращают честный
+   `/api/profile`, `/api/transactions`, `/api/channel-subscriptions` возвращают честный
    401/500 — экран показывает ответ сервера и кнопку повтора (ошибка не маскируется).
 6. Все запросы идут через один механизм: `apiFetch` (`lib/api.ts`, `credentials: "include"`,
    `cache: "no-store"`) и `session.authedFetch`, который при 401 один раз повторяет вход
@@ -257,14 +257,13 @@ Telegram Update на `/api/telegram/webhook` — так проверяется �
 | GET | `/api/tasks` | задания + прогресс; для `TELEGRAM_SUBSCRIPTION` — каналы и статусы заявок, остальные задания `locked` до 3/3 |
 | GET | `/api/tasks/[id]` | задание, варианты ответов, результат пользователя, каналы |
 | POST | `/api/submissions` | выполнение задания одной транзакцией PostgreSQL (`task_completions` + `transactions` + баланс) |
-| GET | `/api/channel-requests` | ⚠️ legacy: заявки `chat_join_request` (новая механика не использует) |
 | GET | `/api/channel-subscriptions` | фактическая подписка на обязательные каналы: сервер вызывает `getChatMember` по каждому каналу из `config/telegram-channels.ts` |
 | GET | `/api/profile` | профиль и статистика из базы (место в рейтинге, выполнено сегодня) |
 | GET | `/api/transactions` | история виртуальных операций пользователя (пагинация) |
 | GET | `/api/leaderboard` | ТОП-30 по `total_earned DESC` + блок текущего пользователя |
 | GET | `/api/stats` | участники и выплаченные бонусы по таблице `users` |
 | GET | `/api/health` | диагностика окружения: доступность базы, наличие схемы, короткая причина сбоя, наличие серверных переменных (без секретов) |
-| POST | `/api/telegram/webhook` | Telegram Update: `chat_join_request` → запись в `channel_requests`; `/start` → приветствие с кнопкой «Открыть» |
+| POST | `/api/telegram/webhook` | Telegram Update: `/start` → приветствие с кнопкой «Открыть» |
 
 Админ-API (`/api/admin/*`) в MVP удалён вместе с БД: задания задаются в коде,
 администрировать в статическом демо нечего.
@@ -288,8 +287,8 @@ Telegram Update на `/api/telegram/webhook` — так проверяется �
   `left`, `kicked` и любые ошибки Telegram — не подписка;
 - награда при `3/3`: `POST /api/submissions` **сам повторно** проверяет все каналы через
   `getChatMember` перед начислением — флаги с клиента не принимаются;
-- старые `chat_join_request` / `channel_requests` для этой механики не используются
-  (webhook и роут `/api/channel-requests` оставлены как legacy и нигде не вызываются UI).
+- единственная механика — серверная проверка `getChatMember`; заявки на вступление
+  (`chat_join_request`), роут `/api/channel-requests` и запись заявок в БД из проекта удалены.
 
 ### Что нужно настроить, чтобы проверка работала
 
@@ -327,8 +326,8 @@ Telegram Update на `/api/telegram/webhook` — так проверяется �
 - `reward` всегда берётся из определения задания (`lib/demo-data.ts`), а не из тела запроса.
 - Начисление идёт одной транзакцией PostgreSQL: `INSERT task_completions ... ON CONFLICT DO NOTHING`
   + `transactions` + обновление `balance/total_earned/completed_tasks`; повторить задание нельзя.
-- Заявки на каналы учитываются только из `chat_join_request` от Telegram (факт нажатия
-  кнопки или открытия ссылки не засчитывается); `getChatMember` не используется.
+- Подписка учитывается только после серверной проверки Telegram `getChatMember`
+  (факт нажатия кнопки или открытия ссылки не засчитывается).
 - Запросы идут только параметризованными (`$1`, `$2`), `DATABASE_URL` живёт в
   `process.env` внутри `server-only` модуля и не попадает ни в логи, ни в клиентский бандл.
 - Ответы API не содержат stack trace; `alert()` нигде не используется.

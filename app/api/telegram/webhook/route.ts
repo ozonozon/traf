@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { findChannelByInvite } from "@/config/telegram-channels";
 import { branding } from "@/config/branding";
-import { addChannelRequest } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,11 +19,6 @@ interface TelegramUpdate {
   message?: {
     text?: string;
     chat?: { id?: number };
-  };
-  chat_join_request?: {
-    from?: { id?: number };
-    chat?: { id?: number };
-    invite_link?: { invite_link?: string };
   };
 }
 
@@ -58,63 +51,15 @@ async function callBotApi(
 }
 
 /**
- * Заявка на вступление в закрытый канал (chat_join_request).
- *
- * Заявку нельзя подделать со стороны клиента: update приходит от Telegram.
- * Канал определяется по invite-ссылке из заявки (постоянные ссылки из конфига),
- * затем заявка записывается в таблицу channel_requests:
- *   INSERT ... ON CONFLICT (telegram_id, channel_id) DO NOTHING
- * Никаких cookie и тикетов для хранения заявки не используется.
- * Подписки через getChatMember не проверяются.
- */
-async function handleJoinRequest(update: TelegramUpdate): Promise<NextResponse> {
-  const joinRequest = update.chat_join_request;
-  const telegramUserId = joinRequest?.from?.id;
-  const inviteLink = joinRequest?.invite_link?.invite_link ?? null;
-  const channel = findChannelByInvite(inviteLink, joinRequest?.chat?.id ?? null);
-
-  if (typeof telegramUserId !== "number" || !channel) {
-    // Заявка не по нашим каналам или нет данных — просто игнорируем.
-    return NextResponse.json({ ok: true, ignored: true });
-  }
-
-  try {
-    const created = await addChannelRequest({
-      telegramId: String(telegramUserId),
-      channelId: channel.id,
-      inviteLink,
-    });
-
-    return NextResponse.json({
-      ok: true,
-      joinRequest: { channel: channel.index, channelId: channel.id, created },
-    });
-  } catch (error) {
-    // Ошибку базы не раскрываем наружу, в лог уходит только тип.
-    console.error("[telegram-webhook] chat_join_request: не удалось сохранить заявку", error instanceof Error ? error.name : "unknown");
-    return NextResponse.json(
-      { ok: false, delivered: false, error: "DATABASE_ERROR", details: "Не удалось сохранить заявку" },
-      { status: 500 },
-    );
-  }
-}
-
-/**
  * POST /api/telegram/webhook — Update от Telegram Bot API.
  *
- * chat_join_request → запись заявки в PostgreSQL (см. handleJoinRequest).
- * message /start    → ОДНО сообщение: баннер (sendPhoto) + текст приветствия + кнопка «Открыть».
- * Всё остальное игнорируется.
+ * message /start → ОДНО сообщение: баннер (sendPhoto) + текст приветствия + кнопка «Открыть».
+ * Всё остальное игнорируется: подписка проверяется только серверной проверкой getChatMember.
  */
 export async function POST(request: Request) {
   const update = (await request.json().catch(() => null)) as TelegramUpdate | null;
 
-  // 1. Заявка на вступление в канал (обрабатывается до /start и не влияет на него).
-  if (update?.chat_join_request) {
-    return handleJoinRequest(update);
-  }
-
-  // 2. Команда /start.
+  // Команда /start.
   const text = update?.message?.text;
   const chatId = update?.message?.chat?.id;
 

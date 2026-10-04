@@ -9,58 +9,6 @@ import { getTelegramBotToken } from "./env";
  * Технические ответы Telegram наружу не отдаются: наружу идут только понятные коды.
  */
 
-/** Публичные данные бота (getMe): нужны только для диагностики, токен не раскрывается. */
-export interface BotIdentity {
-  tokenConfigured: boolean;
-  tokenValid: boolean;
-  username: string | null;
-  botId: number | null;
-  firstName: string | null;
-  error: string | null;
-}
-
-/**
- * `GET /getMe` — проверка, что TELEGRAM_BOT_TOKEN вообще от Telegram и какому боту он принадлежит.
- * Возвращаются только публичные поля (username/id/имя), сам токен наружу не отдаётся.
- */
-export async function getBotIdentity(): Promise<BotIdentity> {
-  const botToken = getTelegramBotToken();
-  if (!botToken) {
-    return { tokenConfigured: false, tokenValid: false, username: null, botId: null, firstName: null, error: "TOKEN_MISSING" };
-  }
-
-  try {
-    const response = await fetch(`https://api.telegram.org/bot${botToken}/getMe`, { cache: "no-store" });
-    const payload = (await response.json()) as {
-      ok?: boolean;
-      description?: string;
-      result?: { id?: number; username?: string; first_name?: string };
-    };
-
-    if (!response.ok || !payload.ok) {
-      return {
-        tokenConfigured: true,
-        tokenValid: false,
-        username: null,
-        botId: null,
-        firstName: null,
-        error: toErrorCode(payload.description ?? ""),
-      };
-    }
-
-    return {
-      tokenConfigured: true,
-      tokenValid: true,
-      username: payload.result?.username ?? null,
-      botId: payload.result?.id ?? null,
-      firstName: payload.result?.first_name ?? null,
-      error: null,
-    };
-  } catch {
-    return { tokenConfigured: true, tokenValid: false, username: null, botId: null, firstName: null, error: "TELEGRAM_UNAVAILABLE" };
-  }
-}
-
 /** Статусы getChatMember, которые считаются подпиской. */
 const SUBSCRIBED_STATUSES = new Set(["creator", "administrator", "member", "restricted"]);
 
