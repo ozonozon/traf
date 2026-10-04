@@ -1,6 +1,6 @@
 import "server-only";
 
-import { TELEGRAM_CHANNELS, publicChannels } from "@/config/telegram-channels";
+import { TELEGRAM_CHANNELS } from "@/config/telegram-channels";
 
 import { RouteError } from "./http";
 import { getChatMemberStatus } from "./telegram-bot";
@@ -25,28 +25,33 @@ export interface SubscriptionCheck {
 }
 
 export async function checkChannelSubscriptions(telegramId: string): Promise<SubscriptionCheck> {
-  const channels = publicChannels();
-
-  // chat_id для getChatMember берётся только из серверного конфига (config/telegram-channels.ts).
+  // Каждый канал проверяется СВОИМ chatId (config/telegram-channels.ts), и результат сразу
+  // помечается идентификатором этого же канала (id/index). Сопоставления «результат ↔ канал»
+  // по позиции массива нет, поэтому рассинхрон каналов невозможен.
   // Пустой chatId — ошибка настройки: канал считается непроверенным (CHAT_ID_MISSING в lib/telegram-bot.ts).
-  const checks = await Promise.all(
-    TELEGRAM_CHANNELS.map((channel) => getChatMemberStatus(channel.chatId, telegramId)),
+  const pairs = await Promise.all(
+    TELEGRAM_CHANNELS.map(async (channel) => ({
+      channel,
+      check: await getChatMemberStatus(channel.chatId, telegramId),
+    })),
   );
 
   const failed: string[] = [];
-  const result: ChannelSubscriptionDto[] = channels.map((channel, position) => {
-    const check = checks[position];
-    if (check.error && check.error !== "USER_NOT_FOUND") failed.push(channel.id);
+  const result: ChannelSubscriptionDto[] = pairs
+    .map(({ channel, check }) => {
+      if (check.error && check.error !== "USER_NOT_FOUND") failed.push(channel.id);
 
-    return {
-      id: channel.id,
-      index: channel.index,
-      title: channel.title,
-      description: channel.description,
-      inviteLink: channel.inviteLink,
-      subscribed: check.subscribed,
-    };
-  });
+      return {
+        id: channel.id,
+        index: channel.index,
+        title: channel.title,
+        description: channel.description,
+        inviteLink: channel.inviteLink,
+        subscribed: check.subscribed,
+      };
+    })
+    // Порядок отображения — по index канала (1 → 2 → 3), а не по порядку запросов в Telegram.
+    .sort((left, right) => left.index - right.index);
 
   const subscribedCount = result.filter((channel) => channel.subscribed).length;
 

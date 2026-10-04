@@ -29,7 +29,7 @@ export function TaskSuccess({
 
         <p className="text-[34px] leading-none font-extrabold text-primary">+{formatRub(reward)}</p>
         <p className="text-[13px] font-semibold text-success">
-          {isFresh ? "Баланс обновлён · виртуальные рубли" : "Вознаграждение уже начислено"}
+          {isFresh ? "Баланс обновлён" : "Вознаграждение уже начислено"}
         </p>
 
         {answer ? (

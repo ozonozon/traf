@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
-import { copy } from "@/config/branding";
 import { hapticNotification, openExternalLink } from "@/lib/telegram";
 
 /** Ссылка на менеджера для вопросов по выводу. */
@@ -88,10 +87,6 @@ export function ExchangeSheet({ open, onClose }: { open: boolean; onClose: () =>
           </Button>
         </div>
       )}
-
-      <p className="mt-3 text-[12px] leading-snug text-muted">
-        Реального вывода средств нет: это тренировочный симулятор, {copy.currencyName} нельзя обменять на деньги.
-      </p>
     </BottomSheet>
   );
 }

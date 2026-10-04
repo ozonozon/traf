@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { AppFrame } from "@/components/layout/AppFrame";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { TaskCard } from "@/components/tasks/TaskCard";
@@ -17,6 +19,9 @@ export default function TasksPage() {
   const { data, error, isLoading, refresh } = useAuthedApi<TasksResponseDto>("/api/tasks");
   const isPending = isLoading;
   const tasks = data?.tasks ?? [];
+  const progress = data?.progress ?? null;
+  // Все задания выполнены (данные прогресса считает сервер по task_completions).
+  const allDone = progress !== null && progress.total > 0 && progress.completed === progress.total;
 
   return (
     <AppFrame withGrid>
@@ -55,6 +60,20 @@ export default function TasksPage() {
               tasks.map((task) => <TaskCard key={task.id} task={task} />)
             )}
           </div>
+
+          {allDone ? (
+            <div className="mt-5">
+              <Link
+                href="/profile"
+                className="pressable flex h-[54px] items-center justify-center rounded-[24px] bg-primary text-[16px] font-bold text-white"
+              >
+                ВЫВЕСТИ ДЕНЬГИ
+              </Link>
+              <p className="mt-2.5 text-center text-[13px] font-semibold text-muted">
+                Приходи завтра и выполняй еще задания
+              </p>
+            </div>
+          ) : null}
         </section>
       </main>
     </AppFrame>

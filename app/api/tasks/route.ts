@@ -1,8 +1,7 @@
-import { getCurrentUser } from "@/lib/auth";
 import { checkChannelSubscriptions } from "@/lib/channel-subscriptions";
 import { getCompletedTaskIds } from "@/lib/db";
 import { listDemoTasks, resolveDeadline } from "@/lib/demo-data";
-import { handleRouteError, jsonOk } from "@/lib/http";
+import { handleRouteError, jsonOk, requireUser } from "@/lib/http";
 import {
   TELEGRAM_SUBSCRIPTION_TASK_TYPE,
   computeTaskState,
@@ -18,7 +17,11 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/tasks
  *
- * Задания и прогресс текущего пользователя. Все пользовательские данные — из PostgreSQL.
+ * Задания и прогресс ТЕКУЩЕГО пользователя. Авторизация — та же, что у /api/profile
+ * (`requireUser()`: заголовок X-Telegram-Init-Data, затем подписанная cookie), поэтому
+ * выполненные задания всегда берутся из PostgreSQL (task_completions) по telegram_id
+ * из сессии. Анонимного ответа «всё сброшено» больше нет: без авторизации — 401,
+ * клиент получает ошибку и повторяет вход, а не показывает ложное пустое состояние.
  *
  * Обязательное задание «Подписка на Telegram-каналы»: статусы каналов приходят из
  * серверной проверки Telegram Bot API (`getChatMember`), а остальные задания закрыты,
@@ -27,19 +30,17 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   try {
-    const user = await getCurrentUser();
+    const user = await requireUser();
 
-    const completedIds = user ? await getCompletedTaskIds(user.telegram_id) : [];
+    const completedIds = await getCompletedTaskIds(user.telegram_id);
     const subscriptionDone = isSubscriptionTaskDone(completedIds);
 
     const deadline = resolveDeadline();
 
     // Живая проверка подписок нужна только пока обязательное задание не выполнено.
-    // Без авторизации отдаём публичный список каналов, чтобы карточки были видны.
-    const subscriptionCheck =
-      user && !subscriptionDone
-        ? await checkChannelSubscriptions(user.telegram_id).catch(() => null)
-        : null;
+    const subscriptionCheck = !subscriptionDone
+      ? await checkChannelSubscriptions(user.telegram_id).catch(() => null)
+      : null;
     const subscriptionChannels = subscriptionCheck?.channels ?? publicSubscriptionChannels();
 
     const items = listDemoTasks().map((task) => {

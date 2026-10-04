@@ -56,7 +56,6 @@ function TaskCardBody({ task }: { task: TaskListItemDto }) {
         <p className={cn("text-[16.5px] font-extrabold", isInactive ? "text-muted" : "text-primary")}>
           +{formatRub(task.reward)}
         </p>
-        <p className="mt-0.5 text-[11.5px] text-muted">виртуально</p>
       </div>
     </>
   );

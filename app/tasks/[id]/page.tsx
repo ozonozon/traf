@@ -106,9 +106,6 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
               <section className="card-surface p-5">
                 <h2 className="text-[17px]">Условия задания</h2>
                 <p className="mt-2.5 text-[14.5px] leading-snug">{task.conditions}</p>
-                {isSubscriptionTask ? null : (
-                  <p className="mt-2.5 text-[12.5px] text-muted">Виртуальный объект: {task.virtualTarget}</p>
-                )}
               </section>
             )}
 

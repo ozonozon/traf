@@ -1,10 +1,9 @@
 import type { NextRequest } from "next/server";
 
-import { getCurrentUser } from "@/lib/auth";
 import { checkChannelSubscriptions } from "@/lib/channel-subscriptions";
 import { getCompletedTaskIds, getTaskCompletion } from "@/lib/db";
 import { findDemoTask, resolveDeadline } from "@/lib/demo-data";
-import { RouteError, handleRouteError, jsonOk } from "@/lib/http";
+import { RouteError, handleRouteError, jsonOk, requireUser } from "@/lib/http";
 import {
   TELEGRAM_SUBSCRIPTION_TASK_TYPE,
   computeTaskState,
@@ -18,11 +17,16 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** GET /api/tasks/[id] — задание, его варианты ответов и результат текущего пользователя. */
+/** GET /api/tasks/[id] — задание, его варианты ответов и результат текущего пользователя.
+ *
+ * Авторизация — как у /api/profile (`requireUser()`): результат задания и факт его выполнения
+ * берутся из PostgreSQL (task_completions) по telegram_id из сессии, поэтому после перезапуска
+ * Mini App состояние задания не сбрасывается.
+ */
 export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params;
-    const user = await getCurrentUser();
+    const user = await requireUser();
 
     const task = findDemoTask(id);
     if (!task) {
@@ -32,15 +36,14 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
       throw new RouteError("TASK_NOT_ACTIVE", "Задание больше не доступно", 404);
     }
 
-    const [completion, completedIds] = user
-      ? await Promise.all([getTaskCompletion(user.telegram_id, task.id), getCompletedTaskIds(user.telegram_id)])
-      : [null, []];
+    const [completion, completedIds] = await Promise.all([
+      getTaskCompletion(user.telegram_id, task.id),
+      getCompletedTaskIds(user.telegram_id),
+    ]);
 
     // Статусы каналов — из серверной проверки Telegram Bot API getChatMember.
-    // Без авторизации отдаём публичный список каналов (subscribed: false), чтобы
-    // карточки и кнопки «ПОДПИСАТЬСЯ» были видны всегда.
     const subscriptionCheck =
-      user && task.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE && !completion
+      task.type === TELEGRAM_SUBSCRIPTION_TASK_TYPE && !completion
         ? await checkChannelSubscriptions(user.telegram_id).catch(() => null)
         : null;
 

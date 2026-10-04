@@ -145,7 +145,7 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
 
   return (
     <div className="space-y-3.5">
-      {channels.map((channel, index) => {
+      {channels.map((channel) => {
         const isSubscribed = channel.subscribed;
 
         return (
@@ -158,7 +158,7 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
                 )}
                 aria-hidden
               >
-                {index + 1}
+                {channel.index}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[15.5px] leading-tight font-bold">{channel.title}</p>

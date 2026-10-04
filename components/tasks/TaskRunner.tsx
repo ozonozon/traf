@@ -59,7 +59,7 @@ export function TaskRunner({ task }: { task: TaskDetailDto }) {
       setIsFresh(true);
       hapticNotification("success");
       toast.show("Задание выполнено", {
-        description: `+${formatRub(response.reward)} добавлено · виртуально`,
+        description: `+${formatRub(response.reward)} добавлено`,
         variant: "success",
       });
     } catch (cause) {

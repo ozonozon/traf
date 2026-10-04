@@ -10,6 +10,13 @@
  * либо публичный `@username`. Бот (@BotFather) должен быть добавлен в каждый канал;
  * для приватных каналов и каналов без публичного username — обязательно администратором,
  * иначе Telegram отвечает «chat not found» и проверка вернёт понятную ошибку.
+ *
+ * ⚠️ ИНВАРИАНТ: `chatId` и `inviteLink` одной карточки обязаны указывать на ОДИН И ТОТ ЖЕ
+ * канал. Пользователь подписывается по `inviteLink`, а сервер проверяет `chatId` — если они
+ * разъедутся, после подписки по карточке №1 подтвердится карточка №2 (и наоборот).
+ * Как проверить: название канала из `getChat(chatId)` должно совпадать с названием, которое
+ * отдаёт страница invite-ссылки (`https://t.me/+hash` → `og:title`).
+ * Реальные каналы этого конфига: 1 — «ВСЕ О СПОРТЕ», 2 — «СПЛЕТНИ ЗВЕЗД», 3 — «НОВОСТИ КАЖДЫЙ ДЕНЬ».
  */
 
 /** Номер канала: совпадает с полями channel1Subscribed…channel3Subscribed в состоянии. */
@@ -17,6 +24,7 @@ export type TelegramChannelIndex = 1 | 2 | 3;
 
 export interface TelegramChannelConfig {
   index: TelegramChannelIndex;
+  /** Стабильный ключ карточки для интерфейса (не путать с `chatId` — по нему идёт проверка). */
   id: string;
   /** Название канала для карточки задания. */
   title: string;
@@ -44,7 +52,8 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
     title: "Канал с заданиями",
     description: "Новые задания и выплаты каждый день",
     inviteLink: "https://t.me/+MWJ1dz5nuf4zMjcx",
-    chatId: "-1004218822912",
+    // Канал по этой invite-ссылке — «ВСЕ О СПОРТЕ» (проверено getChat).
+    chatId: "-1003929038199",
   },
   {
     index: 2,
@@ -52,7 +61,8 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
     title: "Канал с выплатами",
     description: "Новости платформы и розыгрыши",
     inviteLink: "https://t.me/+nJs69Y_Xpm5hMDU5",
-    chatId: "-1003929038199",
+    // Канал по этой invite-ссылке — «СПЛЕТНИ ЗВЕЗД» (проверено getChat).
+    chatId: "-1004218822912",
   },
   {
     index: 3,
@@ -60,6 +70,7 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
     title: "Канал поддержки",
     description: "Ответы на вопросы и помощь",
     inviteLink: "https://t.me/+0o4yDY6AODI3OTQx",
+    // Канал по этой invite-ссылке — «НОВОСТИ КАЖДЫЙ ДЕНЬ» (проверено getChat).
     chatId: "-1004398133122",
   },
 ];
