@@ -9,6 +9,7 @@ import { AppFrame } from "@/components/layout/AppFrame";
 import { BalancePill } from "@/components/layout/BalancePill";
 import { TaskRunner } from "@/components/tasks/TaskRunner";
 import { TelegramSubscription } from "@/components/tasks/TelegramSubscription";
+import { TelegramIcon } from "@/components/ui/TelegramIcon";
 import { useAuthedApi } from "@/lib/hooks";
 import { TELEGRAM_SUBSCRIPTION_TASK_ID, TELEGRAM_SUBSCRIPTION_TASK_TYPE } from "@/lib/task-constants";
 import type { TaskDetailResponseDto } from "@/lib/types";
@@ -37,7 +38,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
 
   return (
     <AppFrame withGrid>
-      <div className="safe-top">
+      <div>
         <div className="flex items-center justify-between gap-3 px-5 pt-4">
           <button
             type="button"
@@ -65,7 +66,11 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           <div className="space-y-3.5">
             <section className="card-surface p-5">
               <div className="flex size-16 items-center justify-center rounded-[20px] bg-primary-soft text-[32px] leading-none">
-                <span aria-hidden>{task.icon}</span>
+                {isSubscriptionTask ? (
+                  <TelegramIcon size={34} className="text-primary" />
+                ) : (
+                  <span aria-hidden>{task.icon}</span>
+                )}
               </div>
 
               <h1 className="mt-4 text-[26px] leading-[1.1] tracking-[-0.03em]">{task.title}</h1>
@@ -101,7 +106,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
               <section className="card-surface p-5">
                 <h2 className="text-[17px]">Условия задания</h2>
                 <p className="mt-2.5 text-[14.5px] leading-snug">{task.conditions}</p>
-                <p className="mt-2.5 text-[12.5px] text-muted">Виртуальный объект: {task.virtualTarget}</p>
+                {isSubscriptionTask ? null : (
+                  <p className="mt-2.5 text-[12.5px] text-muted">Виртуальный объект: {task.virtualTarget}</p>
+                )}
               </section>
             )}
 

@@ -145,11 +145,6 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
 
   return (
     <div className="space-y-3.5">
-      <p className="px-1 text-[13px] leading-snug text-muted">
-        Подпишись на все {channels.length} канала — у каждого своя кнопка «ПОДПИСАТЬСЯ». Когда подписки будут
-        оформлены, нажми «ПРОВЕРИТЬ ПОДПИСКУ».
-      </p>
-
       {channels.map((channel, index) => {
         const isSubscribed = channel.subscribed;
 
@@ -203,16 +198,7 @@ export function TelegramSubscription({ task }: { task: TaskDetailDto }) {
             <Check size={15} strokeWidth={3} />
             Все подписки подтверждены
           </p>
-        ) : hasChecked ? (
-          <p className="mt-2 text-[13px] leading-snug text-muted">
-            Telegram подтвердил {subscribedCount} из {channels.length}. Подпишитесь на остальные каналы и нажмите
-            «ПРОВЕРИТЬ ПОДПИСКУ» ещё раз.
-          </p>
-        ) : (
-          <p className="mt-2 text-[13px] leading-snug text-muted">
-            Подписка засчитывается только по данным Telegram — после нажатия «ПРОВЕРИТЬ ПОДПИСКУ».
-          </p>
-        )}
+        ) : null}
       </section>
 
       <div className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[900px] border-t border-border bg-card/95 px-5 pt-3 pb-[calc(14px+env(safe-area-inset-bottom,0px))] backdrop-blur-md">

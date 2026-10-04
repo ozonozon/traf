@@ -2,14 +2,25 @@
 
 import { useState } from "react";
 
-import { VirtualNote } from "@/components/ui/VirtualNote";
+import { useToast } from "@/components/ui/Toast";
 import { formatRub } from "@/lib/utils";
 
 import { ExchangeSheet } from "./ExchangeSheet";
 
 /** Большая карточка виртуального баланса + игровой обмен. */
 export function BalanceCard({ balance, totalEarned }: { balance: number; totalEarned: number }) {
+  const toast = useToast();
   const [isSheetOpen, setIsSheetOpen] = useState(false);
+
+  /** Нулевой баланс: сообщение без дальнейших действий. Иначе — выбор способа вывода. */
+  function handleWithdraw() {
+    if (balance <= 0) {
+      toast.show("Сначала выполните задание");
+      return;
+    }
+
+    setIsSheetOpen(true);
+  }
 
   return (
     <>
@@ -29,16 +40,12 @@ export function BalanceCard({ balance, totalEarned }: { balance: number; totalEa
 
         <button
           type="button"
-          onClick={() => setIsSheetOpen(true)}
+          onClick={handleWithdraw}
           className="pressable mt-3 h-[54px] w-full rounded-[24px] bg-accent-surface text-[16px] font-bold text-accent-surface-text"
         >
           Вывести деньги
         </button>
       </section>
-
-      <VirtualNote className="mt-3">
-        Виртуальный баланс — игровая статистика внутри приложения. Реального вывода средств, карт и платежей нет.
-      </VirtualNote>
 
       <ExchangeSheet open={isSheetOpen} onClose={() => setIsSheetOpen(false)} />
     </>

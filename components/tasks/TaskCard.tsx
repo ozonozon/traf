@@ -1,6 +1,7 @@
-import { Check, Clock, Lock, Send, Users } from "lucide-react";
+import { Check, Clock, Lock, Users } from "lucide-react";
 import Link from "next/link";
 
+import { TelegramIcon } from "@/components/ui/TelegramIcon";
 import { hapticImpact } from "@/lib/telegram";
 import type { TaskListItemDto } from "@/lib/types";
 import { cn, formatDeadline, formatRub, plural } from "@/lib/utils";
@@ -17,7 +18,7 @@ function TaskCardBody({ task }: { task: TaskListItemDto }) {
   return (
     <>
       <div className="flex size-12 shrink-0 items-center justify-center rounded-[16px] bg-primary-soft text-[24px] leading-none">
-        {isSubscription ? <Send size={22} className="text-primary" /> : <span aria-hidden>{task.icon}</span>}
+        {isSubscription ? <TelegramIcon size={24} className="text-primary" /> : <span aria-hidden>{task.icon}</span>}
       </div>
 
       <div className="min-w-0 flex-1">

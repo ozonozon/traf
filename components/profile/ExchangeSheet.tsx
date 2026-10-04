@@ -14,23 +14,24 @@ const MANAGER_URL = "https://goo.su/qndatD";
 /** Сколько «подготавливаем вывод» перед показом ошибки. */
 const PREPARING_MS = 1800;
 
-type WithdrawState = "preparing" | "error";
+type WithdrawState = "choose" | "preparing" | "error";
 
 /**
  * Bottom sheet «Вывод средств».
  *
- * Сначала короткое состояние подготовки, затем красное состояние ошибки с кнопкой
- * «Написать менеджеру». Реальных платежей и финансовых операций нет и не добавляется.
+ * Сначала выбор способа вывода («По СБП» / «На карту»), затем короткое состояние
+ * подготовки и красное состояние ошибки с кнопкой «Написать менеджеру».
+ * Реальных платежей и финансовых операций нет и не добавляется.
  */
 export function ExchangeSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [state, setState] = useState<WithdrawState>("preparing");
+  const [state, setState] = useState<WithdrawState>("choose");
   const [wasOpen, setWasOpen] = useState(open);
 
-  // Каждое открытие меню начинается заново с подготовки (корректировка состояния
+  // Каждое открытие меню начинается с выбора способа вывода (корректировка состояния
   // при изменении пропа, без setState внутри эффекта).
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open) setState("preparing");
+    if (open) setState("choose");
   }
 
   useEffect(() => {
@@ -49,9 +50,19 @@ export function ExchangeSheet({ open, onClose }: { open: boolean; onClose: () =>
       open={open}
       onClose={onClose}
       title="Вывод средств"
-      description="Проверяем возможность вывода виртуального баланса."
+      description={state === "choose" ? undefined : "Проверяем возможность вывода виртуального баланса."}
     >
-      {state === "preparing" ? (
+      {state === "choose" ? (
+        <div className="flex flex-col items-center gap-3 rounded-[22px] border border-border bg-surface px-5 py-6 text-center">
+          <p className="text-[16px] leading-snug font-bold">Куда вывести деньги?</p>
+          <Button variant="primary" size="md" className="mt-1" onClick={() => setState("preparing")}>
+            По СБП
+          </Button>
+          <Button variant="secondary" size="md" onClick={() => setState("preparing")}>
+            На карту
+          </Button>
+        </div>
+      ) : state === "preparing" ? (
         <div className="flex flex-col items-center gap-3 rounded-[22px] border border-border bg-surface px-5 py-8 text-center">
           <Loader2 size={28} className="animate-spin text-primary" />
           <p className="text-[15.5px] font-bold">Подготавливаем вывод...</p>

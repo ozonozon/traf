@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 import { BottomNav } from "@/components/layout/BottomNav";
+import { PartnerBonusBanner } from "@/components/layout/PartnerBonusBanner";
 import { TelegramProvider } from "@/components/telegram/TelegramProvider";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { ToastProvider } from "@/components/ui/Toast";
@@ -55,6 +56,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <ToastProvider>
             <TelegramProvider>
               <div id="app" className="app-frame">
+                <PartnerBonusBanner />
                 {children}
               </div>
               <BottomNav />

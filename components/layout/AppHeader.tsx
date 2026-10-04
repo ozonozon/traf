@@ -7,7 +7,7 @@ import { BalancePill } from "./BalancePill";
 /** Шапка: логотип + название + виртуальный баланс. */
 export function AppHeader() {
   return (
-    <header className="safe-top">
+    <header>
       <div className="flex items-center gap-3 px-5 pt-4 pb-1">
         {/* Контейнер сохраняет прежний размер (44px) и скругление; картинка не растягивается. */}
         {/* Локальная иконка из public/: обычный <img>, оптимизация next/image здесь не нужна. */}
