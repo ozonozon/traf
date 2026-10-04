@@ -59,3 +59,33 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 CREATE INDEX IF NOT EXISTS transactions_telegram_idx ON transactions (telegram_id, created_at DESC);
+
+-- Цепочка добивающих сообщений после /start: одна запись на пользователя.
+-- periodic_next_at — когда отправлять периодическое сообщение (каждые 15 часов),
+-- stopped_at — цепочка остановлена (все задания выполнены или бот не может писать).
+CREATE TABLE IF NOT EXISTS telegram_followups (
+  telegram_id      BIGINT PRIMARY KEY,
+  started_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+  stopped_at       TIMESTAMP,
+  stopped_reason   TEXT,
+  is_blocked       BOOLEAN NOT NULL DEFAULT FALSE,
+  periodic_sent    INTEGER NOT NULL DEFAULT 0,
+  periodic_next_at TIMESTAMP NOT NULL,
+  updated_at       TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Отложенные сообщения цепочки: одна строка на шаг (UNIQUE не даёт дублей),
+-- sent_at — факт отправки (идемпотентность при повторных прогонах воркера).
+CREATE TABLE IF NOT EXISTS telegram_followup_messages (
+  id          SERIAL PRIMARY KEY,
+  telegram_id BIGINT NOT NULL,
+  step        TEXT NOT NULL,
+  due_at      TIMESTAMP NOT NULL,
+  sent_at     TIMESTAMP,
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  last_error  TEXT,
+  UNIQUE (telegram_id, step)
+);
+
+CREATE INDEX IF NOT EXISTS telegram_followup_messages_due_idx ON telegram_followup_messages (sent_at, due_at);
+

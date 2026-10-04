@@ -106,6 +106,30 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 CREATE INDEX IF NOT EXISTS transactions_telegram_idx ON transactions (telegram_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS telegram_followups (
+  telegram_id      BIGINT PRIMARY KEY,
+  started_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+  stopped_at       TIMESTAMP,
+  stopped_reason   TEXT,
+  is_blocked       BOOLEAN NOT NULL DEFAULT FALSE,
+  periodic_sent    INTEGER NOT NULL DEFAULT 0,
+  periodic_next_at TIMESTAMP NOT NULL,
+  updated_at       TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS telegram_followup_messages (
+  id          SERIAL PRIMARY KEY,
+  telegram_id BIGINT NOT NULL,
+  step        TEXT NOT NULL,
+  due_at      TIMESTAMP NOT NULL,
+  sent_at     TIMESTAMP,
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  last_error  TEXT,
+  UNIQUE (telegram_id, step)
+);
+
+CREATE INDEX IF NOT EXISTS telegram_followup_messages_due_idx ON telegram_followup_messages (sent_at, due_at);
 `;
 
 let schemaReady: Promise<void> | null = null;
@@ -386,4 +410,127 @@ export async function getPlatformStats(): Promise<{ participants: number; totalB
     participants: Number(row?.participants ?? 0),
     totalBonuses: Number(row?.total_bonuses ?? 0),
   };
+}
+
+// --- Цепочка добивающих сообщений после /start -------------------------------
+
+export interface FollowupStepInput {
+  step: string;
+  delayMinutes: number;
+}
+
+export interface FollowupTargetRow {
+  telegram_id: string;
+  /** Самый ранний просроченный неотправленный шаг (или null). */
+  due_step: string | null;
+  /** Подошло время периодического сообщения. */
+  periodic_due: boolean;
+}
+
+/**
+ * Создаёт цепочку и её шаги для пользователя.
+ * Повторный вызов (/start снова) ничего не дублирует и НЕ перезапускает цепочку:
+ * и цепочка, и шаги защищены уникальными ключами + ON CONFLICT DO NOTHING.
+ */
+export async function startFollowupChain(
+  telegramId: string,
+  steps: FollowupStepInput[],
+  periodicHours: number,
+): Promise<void> {
+  await query(
+    `INSERT INTO telegram_followups (telegram_id, periodic_next_at)
+     VALUES ($1, NOW() + ($2 || ' hours')::interval)
+     ON CONFLICT (telegram_id) DO NOTHING`,
+    [telegramId, String(periodicHours)],
+  );
+
+  if (steps.length === 0) return;
+
+  await query(
+    `INSERT INTO telegram_followup_messages (telegram_id, step, due_at)
+     SELECT $1, step, NOW() + (delay_minutes || ' minutes')::interval
+       FROM unnest($2::text[], $3::int[]) AS planned(step, delay_minutes)
+     ON CONFLICT (telegram_id, step) DO NOTHING`,
+    [telegramId, steps.map((item) => item.step), steps.map((item) => item.delayMinutes)],
+  );
+}
+
+/** Пользователи, у которых есть просроченный шаг или подошло периодическое сообщение. */
+export async function listFollowupTargets(limit: number): Promise<FollowupTargetRow[]> {
+  return query<FollowupTargetRow>(
+    `SELECT f.telegram_id::text AS telegram_id,
+            (SELECT m.step FROM telegram_followup_messages m
+              WHERE m.telegram_id = f.telegram_id AND m.sent_at IS NULL AND m.due_at <= NOW()
+              ORDER BY m.due_at ASC, m.id ASC
+              LIMIT 1) AS due_step,
+            (f.periodic_next_at <= NOW()) AS periodic_due
+       FROM telegram_followups f
+      WHERE f.stopped_at IS NULL
+        AND f.is_blocked = FALSE
+        AND (f.periodic_next_at <= NOW()
+             OR EXISTS (SELECT 1 FROM telegram_followup_messages m
+                         WHERE m.telegram_id = f.telegram_id AND m.sent_at IS NULL AND m.due_at <= NOW()))
+      ORDER BY f.started_at ASC
+      LIMIT $1`,
+    [limit],
+  );
+}
+
+/**
+ * Атомарно «забирает» шаг под отправку: true получит ровно один вызвавший,
+ * поэтому повторный запуск крона не отправит то же сообщение дважды.
+ */
+export async function claimFollowupStep(telegramId: string, step: string): Promise<boolean> {
+  const rows = await query<{ id: number }>(
+    `UPDATE telegram_followup_messages
+        SET sent_at = NOW(), attempts = attempts + 1
+      WHERE telegram_id = $1 AND step = $2 AND sent_at IS NULL
+      RETURNING id`,
+    [telegramId, step],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Возвращает шаг в очередь после временной ошибки (сеть, 429) — но не больше 5 попыток.
+ * После исчерпания попыток шаг остаётся «отправленным», чтобы не зацикливаться.
+ */
+export async function releaseFollowupStep(telegramId: string, step: string, error: string): Promise<void> {
+  await query(
+    `UPDATE telegram_followup_messages
+        SET sent_at = CASE WHEN attempts < 5 THEN NULL ELSE sent_at END,
+            last_error = $3
+      WHERE telegram_id = $1 AND step = $2`,
+    [telegramId, step, error.slice(0, 200)],
+  );
+}
+
+/** Атомарно «забирает» периодическое сообщение: одна запись на пользователя, без дублей задач. */
+export async function claimPeriodicFollowup(telegramId: string, hours: number): Promise<boolean> {
+  const rows = await query<{ telegram_id: string }>(
+    `UPDATE telegram_followups
+        SET periodic_sent = periodic_sent + 1,
+            periodic_next_at = NOW() + ($2 || ' hours')::interval,
+            updated_at = NOW()
+      WHERE telegram_id = $1 AND stopped_at IS NULL AND is_blocked = FALSE AND periodic_next_at <= NOW()
+      RETURNING telegram_id`,
+    [telegramId, String(hours)],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Останавливает цепочку: задания выполнены, либо бот больше не может писать пользователю.
+ * Повторный вызов ничего не портит (COALESCE сохраняет первую причину).
+ */
+export async function stopFollowupChain(telegramId: string, reason: string, blocked = false): Promise<void> {
+  await query(
+    `UPDATE telegram_followups
+        SET stopped_at = COALESCE(stopped_at, NOW()),
+            stopped_reason = COALESCE(stopped_reason, $2),
+            is_blocked = is_blocked OR $3,
+            updated_at = NOW()
+      WHERE telegram_id = $1`,
+    [telegramId, reason.slice(0, 120), blocked],
+  );
 }

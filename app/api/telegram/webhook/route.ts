@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 
 import { branding } from "@/config/branding";
+import { drainFollowupMessages, startFollowupChainFor } from "@/lib/telegram-followups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,8 +54,12 @@ async function callBotApi(
 /**
  * POST /api/telegram/webhook — Update от Telegram Bot API.
  *
- * message /start → ОДНО сообщение: баннер (sendPhoto) + текст приветствия + кнопка «Открыть».
+ * message /start → ОДНО сообщение: баннер (sendPhoto) + текст приветствия + кнопка «Открыть»,
+ *                  плюс идемпотентный запуск цепочки добивающих сообщений (lib/telegram-followups.ts).
  * Всё остальное игнорируется: подписка проверяется только серверной проверкой getChatMember.
+ *
+ * Любой апдейт — повод до-отправить просроченные сообщения цепочки (в фоне, через after()):
+ * ответ Telegram не ждёт рассылку, ошибки рассылки никогда не ломают webhook.
  */
 export async function POST(request: Request) {
   const update = (await request.json().catch(() => null)) as TelegramUpdate | null;
@@ -63,10 +68,16 @@ export async function POST(request: Request) {
   const text = update?.message?.text;
   const chatId = update?.message?.chat?.id;
 
-  // Не /start (или нечего отправлять) — ничего не делаем.
+  // Не /start (или нечего отправлять) — приветствие не шлём, но цепочку обслуживаем.
   if (typeof text !== "string" || !text.startsWith("/start") || typeof chatId !== "number") {
+    after(() => drainFollowupMessages().catch(() => undefined));
     return NextResponse.json({ ok: true, ignored: true });
   }
+
+  // Запуск/продолжение цепочки добивающих сообщений: идемпотентно, повторный /start
+  // ничего не дублирует. Ошибки БД здесь не влияют на ответ /start.
+  await startFollowupChainFor(chatId);
+  after(() => drainFollowupMessages().catch(() => undefined));
 
   // Адрес Mini App и баннера берём из NEXT_PUBLIC_APP_URL: только абсолютный HTTPS.
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().replace(/\/+$/, "");
